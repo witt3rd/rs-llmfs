@@ -53,16 +53,22 @@ Result<(), Box<dyn std::error::Error>>
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    url: String,
-    #[arg(short, long, default_value = "data")]
-    directory: String,
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    Download { url: String, output: String },
+    Demo,
+    Analyze { file_path: String, #[arg(short, long)] preview_length: usize },
 }
 ```
 
 - Derive macros generate parser code
-- Automatic help generation
-- Type-safe argument parsing
-- Validation and error messages
+- Subcommands for different modes of operation
+- Type-safe argument parsing with enums
+- Automatic help generation for each subcommand
 
 ### 6. **Streaming I/O**
 
@@ -79,7 +85,49 @@ while let Some(item) = stream.next().await {
 - `StreamExt` trait provides combinators
 - Backpressure handling built-in
 
+### 7. **Async File I/O with UTF-8**
+
+```rust
+let raw_text = fs::read_to_string(file_path).await?;
+let char_count = raw_text.len();
+let preview: String = raw_text.chars().take(99).collect();
+```
+
+- `tokio::fs` provides async file operations
+- UTF-8 encoding handled automatically
+- `chars()` iterator respects Unicode boundaries
+- Efficient string slicing with iterators
+
+### 8. **Pattern Matching with Enums**
+
+```rust
+match args.command {
+    Commands::Download { url, output } => { /* ... */ },
+    Commands::Demo => { /* ... */ },
+    Commands::Analyze { file_path, preview_length } => { /* ... */ },
+}
+```
+
+- Exhaustive pattern matching
+- Destructuring enum variants
+- Compile-time completeness checking
+- Clear control flow
+
 ## Patterns and Idioms
+
+### Subcommand Architecture
+
+```rust
+Commands::Demo => {
+    // Orchestrate multiple operations
+    let file_path = download_file(url, Some("the-verdict.txt")).await?;
+    analyze_text("the-verdict.txt", 99).await?;
+}
+```
+
+- Separation of generic utilities from specific workflows
+- Composable operations
+- Guided experiences alongside flexible tools
 
 ### Builder Pattern with Clap
 
@@ -164,21 +212,21 @@ let data = fetch_data().await;
 
 ### Beginner
 
-1. Add a `--verbose` flag that shows download speed
-2. Implement retry logic for failed downloads
-3. Add support for resuming partial downloads
+1. Add more text statistics to the `analyze` command (average word length, sentence count)
+2. Add a `--quiet` flag to suppress progress bars
+3. Implement a `list` subcommand that shows downloaded files
 
 ### Intermediate
 
-1. Download multiple URLs concurrently
-2. Add bandwidth limiting
-3. Implement a download queue with priority
+1. Add support for analyzing multiple files at once
+2. Implement text encoding detection (not just UTF-8)
+3. Create a `batch` subcommand that downloads from a list of URLs
 
 ### Advanced
 
-1. Create a trait for different storage backends (S3, local, etc.)
-2. Add download verification with checksums
-3. Build a simple download manager with a TUI
+1. Add streaming analysis (analyze while downloading)
+2. Implement parallel downloads with a configurable thread pool
+3. Create a plugin system for custom text analyzers
 
 ## Key Rust Features Demonstrated
 

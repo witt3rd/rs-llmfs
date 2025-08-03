@@ -20,14 +20,32 @@ This chapter introduces the fundamental first step in building any language mode
 - **Incremental updates**: Adding new data to existing corpora
 - **Error handling**: Dealing with network issues, partial downloads
 
-### 3. **Storage Considerations for ML**
+### 3. **Initial Text Analysis**
+
+Understanding your data before processing:
+
+```python
+# Book example:
+with open("the-verdict.txt", "r", encoding="utf-8") as f:
+    raw_text = f.read()
+print("Total number of character:", len(raw_text))
+print(raw_text[:99])
+```
+
+Key metrics to examine:
+- **Character count**: Total size of the text
+- **Line count**: Structure of the document
+- **Word count**: Vocabulary size estimation
+- **Preview**: Quick quality check of content
+
+### 4. **Storage Considerations for ML**
 
 - Organizing data for efficient access during training
 - Directory structures that support train/validation/test splits
 - Metadata tracking (source, download date, version)
 - Compression vs. quick access trade-offs
 
-### 4. **Preprocessing Pipeline Preparation**
+### 5. **Preprocessing Pipeline Preparation**
 
 - Setting up infrastructure for future text processing steps
 - Considering tokenization requirements early
@@ -62,6 +80,33 @@ To fully understand this chapter, you should be familiar with:
 - HTTP/HTTPS protocols
 - Command-line interfaces
 - File system organization
+
+## Practical Implementation
+
+Our Rust implementation provides three key capabilities:
+
+### 1. **Guided Demo Mode**
+Replicates the exact book examples:
+```bash
+cargo run -p ch02 -- demo
+```
+- Downloads "the-verdict.txt" 
+- Analyzes with 99-character preview
+- Shows Python equivalents for learning
+
+### 2. **Generic Download Tool**
+For experimenting with different texts:
+```bash
+cargo run -p ch02 -- download <URL> <output-path>
+```
+
+### 3. **Text Analysis Tool**
+For examining any text file:
+```bash
+cargo run -p ch02 -- analyze <file-path> --preview-length 200
+```
+
+This modular approach allows both guided learning and experimentation.
 
 ## Looking Ahead
 

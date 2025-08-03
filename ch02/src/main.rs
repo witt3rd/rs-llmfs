@@ -12,47 +12,63 @@
 //! - CLI argument parsing
 //! - Progress bars and visual feedback
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use futures_util::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use reqwest;
 use std::cmp::min;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 
-/// A simple file downloader with progress reporting
+/// A file downloader with progress reporting for LLM text data acquisition
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
+#[command(author, version, about = "Chapter 2: Working with Text Data", long_about = None)]
 struct Args {
-    /// URL to download from
-    url: String,
-
-    /// Directory to save the file (defaults to "data")
-    #[arg(short, long, default_value = "data")]
-    directory: String,
+    #[command(subcommand)]
+    command: Commands,
 }
 
-/// Downloads a file from a URL with progress reporting and saves it to a local directory.
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Download a file from a URL to a specific location
+    Download {
+        /// URL to download from
+        url: String,
+
+        /// Output path (required - can be file or directory)
+        output: String,
+    },
+    /// Run the complete book demo (download + analyze the-verdict.txt)
+    Demo,
+    /// Analyze any text file (character count, preview, etc.)
+    Analyze {
+        /// Path to the text file to analyze
+        file_path: String,
+        
+        /// Number of characters to preview
+        #[arg(short, long, default_value = "99")]
+        preview_length: usize,
+    },
+}
+
+/// Downloads a file from a URL with progress reporting.
 ///
 /// # Arguments
 /// 
-/// * `url` - The URL to download from (borrowed string slice `&str`)
-/// * `local_dir` - The local directory path to save the file
+/// * `url` - The URL to download from
+/// * `output_path` - The output path (can be a file or directory)
 ///
 /// # Returns
 /// 
-/// * `Result<(), Box<dyn std::error::Error>>` - Success or any error type
+/// * `Result<PathBuf, Box<dyn std::error::Error>>` - Path to downloaded file or error
 ///
-/// # Progress Reporting
+/// # Behavior
 /// 
-/// This function now includes visual progress reporting using the indicatif crate.
-/// It shows:
-/// - A progress bar with percentage completion
-/// - Download speed in MB/s
-/// - Estimated time remaining
-/// - Total bytes downloaded
-async fn download_file(url: &str, local_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
+/// - If output_path is a directory, the filename is extracted from the URL
+/// - If output_path is a file path, the file is saved with that exact name
+/// - Progress reporting shows download speed and estimated time remaining
+async fn download_file(url: &str, output_path: Option<&str>) -> Result<PathBuf, Box<dyn std::error::Error>> {
     // Make an HTTP GET request to the URL
     let response = reqwest::get(url).await?;
     
@@ -66,14 +82,30 @@ async fn download_file(url: &str, local_dir: &str) -> Result<(), Box<dyn std::er
         .content_length()
         .ok_or("Failed to get content length")?;
     
-    // Extract the filename from the URL
-    let file_name = url.split('/').last().unwrap_or("downloaded_file");
-    
-    // Create the full file path by joining the directory and filename
-    let file_path = Path::new(local_dir).join(file_name);
-    
-    // Create the directory (and any parent directories) if they don't exist
-    fs::create_dir_all(local_dir).await?;
+    // Determine the file path based on output_path
+    let file_path = match output_path {
+        Some(path) => {
+            let path = Path::new(path);
+            if path.extension().is_some() || path.to_string_lossy().contains('.') {
+                // It's a file path
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent).await?;
+                }
+                path.to_path_buf()
+            } else {
+                // It's a directory path
+                fs::create_dir_all(path).await?;
+                let file_name = url.split('/').last().unwrap_or("downloaded_file");
+                path.join(file_name)
+            }
+        }
+        None => {
+            // Default to "data" directory
+            fs::create_dir_all("data").await?;
+            let file_name = url.split('/').last().unwrap_or("downloaded_file");
+            Path::new("data").join(file_name)
+        }
+    };
     
     // Create a new file at the specified path
     let mut file = fs::File::create(&file_path).await?;
@@ -85,7 +117,7 @@ async fn download_file(url: &str, local_dir: &str) -> Result<(), Box<dyn std::er
             .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({eta}) {msg}")?
             .progress_chars("#>-")
     );
-    pb.set_message(format!("Downloading {}", file_name));
+    pb.set_message(format!("Downloading {}", file_path.file_name().unwrap_or_default().to_string_lossy()));
     
     // Download the file in chunks with progress reporting
     let mut downloaded: u64 = 0;
@@ -99,7 +131,58 @@ async fn download_file(url: &str, local_dir: &str) -> Result<(), Box<dyn std::er
         pb.set_position(new);
     }
     
-    pb.finish_with_message(format!("Downloaded {} to {}", file_name, file_path.display()));
+    pb.finish_with_message(format!("Downloaded to {}", file_path.display()));
+    
+    Ok(file_path)
+}
+
+/// Analyzes a text file by reading it and displaying statistics.
+///
+/// # Arguments
+/// 
+/// * `file_path` - Path to the text file to analyze
+/// * `preview_length` - Number of characters to preview from the beginning
+///
+/// # Returns
+/// 
+/// * `Result<(), Box<dyn std::error::Error>>` - Success or error
+///
+/// # Behavior
+/// 
+/// This function replicates the book's Python example:
+/// ```python
+/// with open("the-verdict.txt", "r", encoding="utf-8") as f:
+///     raw_text = f.read()
+/// print("Total number of character:", len(raw_text))
+/// print(raw_text[:99])
+/// ```
+async fn analyze_text(file_path: &str, preview_length: usize) -> Result<(), Box<dyn std::error::Error>> {
+    // Read the entire file content with UTF-8 encoding
+    let raw_text = fs::read_to_string(file_path).await?;
+    
+    // Display file information
+    println!("File: {}", file_path);
+    println!("Total number of characters: {}", raw_text.len());
+    
+    // Calculate line and word counts for additional insights
+    let line_count = raw_text.lines().count();
+    let word_count = raw_text.split_whitespace().count();
+    
+    println!("Total number of lines: {}", line_count);
+    println!("Total number of words: {}", word_count);
+    println!();
+    
+    // Display preview of the text
+    println!("First {} characters:", preview_length);
+    println!("---");
+    
+    // Use chars() to handle UTF-8 properly and take the requested number
+    let preview: String = raw_text.chars().take(preview_length).collect();
+    println!("{}", preview);
+    
+    if raw_text.len() > preview_length {
+        println!("...");
+    }
     
     Ok(())
 }
@@ -108,22 +191,67 @@ async fn download_file(url: &str, local_dir: &str) -> Result<(), Box<dyn std::er
 /// 
 /// This function:
 /// 1. Parses command-line arguments using clap
-/// 2. Calls the download function with progress reporting
-/// 3. Handles any errors that occur during the download
+/// 2. Executes the appropriate subcommand
+/// 3. Handles any errors that occur during execution
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse command-line arguments
     let args = Args::parse();
     
-    println!("Starting download...");
-    println!("URL: {}", args.url);
-    println!("Save to: {}", args.directory);
-    println!();
-    
-    // Download the file with progress reporting
-    download_file(&args.url, &args.directory).await?;
-    
-    println!("\nDownload complete!");
+    match args.command {
+        Commands::Download { url, output } => {
+            println!("Starting download...");
+            println!("URL: {}", url);
+            println!("Output: {}", output);
+            println!();
+            
+            let file_path = download_file(&url, Some(&output)).await?;
+            
+            println!("\nDownload complete!");
+            println!("File saved to: {}", file_path.display());
+        }
+        Commands::Demo => {
+            // Run the complete book example from Chapter 2
+            println!("=== Chapter 2 Demo: Working with Text Data ===");
+            println!();
+            println!("This demo replicates the book's Python examples:");
+            println!();
+            
+            // Step 1: Download the file
+            println!("Step 1: Download the text file");
+            println!("Python equivalent:");
+            println!("  import urllib.request");
+            println!("  url = (\"https://raw.githubusercontent.com/rasbt/\"");
+            println!("         \"LLMs-from-scratch/main/ch02/01_main-chapter-code/\"");
+            println!("         \"the-verdict.txt\")");
+            println!("  file_path = \"the-verdict.txt\"");
+            println!("  urllib.request.urlretrieve(url, file_path)");
+            println!();
+            
+            let url = "https://raw.githubusercontent.com/rasbt/LLMs-from-scratch/main/ch02/01_main-chapter-code/the-verdict.txt";
+            let _file_path = download_file(url, Some("the-verdict.txt")).await?;
+            
+            println!("\n✓ Download complete!");
+            println!();
+            
+            // Step 2: Analyze the file
+            println!("Step 2: Read and analyze the text");
+            println!("Python equivalent:");
+            println!("  with open(\"the-verdict.txt\", \"r\", encoding=\"utf-8\") as f:");
+            println!("      raw_text = f.read()");
+            println!("  print(\"Total number of character:\", len(raw_text))");
+            println!("  print(raw_text[:99])");
+            println!();
+            
+            analyze_text("the-verdict.txt", 99).await?;
+            
+            println!("\n=== Demo Complete ===");
+            println!("The file 'the-verdict.txt' is now ready for further text processing examples.");
+        }
+        Commands::Analyze { file_path, preview_length } => {
+            analyze_text(&file_path, preview_length).await?;
+        }
+    }
     
     Ok(())
 }
