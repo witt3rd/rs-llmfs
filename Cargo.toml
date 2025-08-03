@@ -1,0 +1,5 @@
+[workspace]
+members = [
+    "ch02",
+]
+resolver = "2"
