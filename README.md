@@ -1,100 +1,135 @@
 # Build a Large Language Model (From Scratch) - Rust Edition
 
-This repository contains Rust implementations of the code examples from Sebastian Raschka's book **"Build a Large Language Model (From Scratch)"**, originally written for Python and PyTorch. This translation serves as a dual learning resource for understanding both Large Language Models (LLMs) and the Rust programming language.
+## 🎯 A Dual Learning Journey
 
-## About This Project
+This repository is a unique educational project that serves **two parallel learning paths**:
 
-This project translates the educational code examples from the book into idiomatic Rust, providing:
+1. **🧠 Learn to Build LLMs from Scratch** - Following Sebastian Raschka's book to understand how GPT-like models work from first principles
+2. **🦀 Learn Rust Through Real Projects** - Not through abstract tutorials, but by building a complete, practical LLM implementation
 
-- **LLM Education**: Following the book's curriculum to understand how GPT-like models work from first principles
-- **Rust Learning**: Demonstrating advanced Rust concepts including async programming, error handling, and systems programming
-- **Practical Examples**: Working implementations that mirror the book's Python examples in Rust
+## 📚 Why This Project?
 
-## Project Structure
+Most Rust tutorials teach syntax through toy examples. Most ML tutorials assume Python/PyTorch. This project bridges both gaps:
 
-The project is organized as a Cargo workspace with chapter-based modules:
+- **For ML Learners**: See how LLM concepts translate to a systems programming language
+- **For Rust Learners**: Learn by building something substantial and meaningful
+- **For Both**: Experience how educational theory meets practical implementation
+
+## 🏗️ Project Structure
+
+Each chapter contains dual lesson files reflecting both learning paths:
 
 ```
 llmfs/
-├── Cargo.toml          # Workspace configuration
-├── ch02/               # Chapter 2: Working with Text Data
+├── Cargo.toml              # Workspace configuration
+├── README.md               # This file
+├── CLAUDE.md               # AI assistant guidance
+├── ch02/                   # Chapter 2: Working with Text Data
 │   ├── Cargo.toml
+│   ├── LESSONS-LLM.md      # What we learn about LLMs
+│   ├── LESSONS-RS.md       # What we learn about Rust
 │   └── src/
-│       └── main.rs     # Async file downloader example
-└── target/             # Shared build artifacts
+│       └── main.rs         # Implementation
+└── target/                 # Shared build artifacts
 ```
 
-## Getting Started
+## 🚀 Getting Started
 
 ### Prerequisites
 
 - Rust 1.70 or later
 - Cargo (comes with Rust)
+- Curiosity about both LLMs and systems programming
 
-### Building the Project
+### Building and Running
 
 ```bash
 # Build all chapters
 cargo build --workspace
 
-# Build a specific chapter
-cargo build -p ch02
+# Run a specific chapter (e.g., Chapter 2)
+cargo run -p ch02 -- --help
+
+# Run tests
+cargo test --workspace
+
+# Format and lint
+cargo fmt --all
+cargo clippy --workspace -- -D warnings
 ```
 
-### Running Examples
-
-```bash
-# Run a specific chapter
-cargo run -p ch02
-
-# Run with release optimizations
-cargo run -p ch02 --release
-```
-
-## Chapter Overview
+## 📖 Chapter Progress
 
 ### Chapter 2: Working with Text Data
-- **Focus**: Async programming and file I/O
-- **Key Concepts**: 
-  - Tokio async runtime
-  - HTTP requests with reqwest
-  - Error handling with Result types
-  - File system operations
 
-*More chapters will be added as the translation progresses*
+**LLM Concepts**: Data acquisition, corpus preparation, text preprocessing fundamentals
 
-## Learning Objectives
+**Rust Concepts**: Async programming, CLI development, error handling, streaming I/O
 
-This Rust translation helps readers:
+```bash
+# Download a file to the default "data" directory
+cargo run -p ch02 -- https://example.com/file.pdf
 
-1. **Understand LLM Fundamentals** through hands-on implementation
-2. **Learn Rust** by translating Python/PyTorch concepts to Rust equivalents
-3. **Explore Systems Programming** approaches to ML infrastructure
-4. **Practice Modern Rust Patterns** including async/await, error handling, and type safety
+# Specify a custom download directory  
+cargo run -p ch02 -- https://example.com/file.zip -d /custom/path
+```
 
-## About the Original Book
+*More chapters coming as the translation progresses...*
 
-"Build a Large Language Model (From Scratch)" by Sebastian Raschka is a comprehensive guide that teaches readers how to build GPT-like language models from first principles. The book covers:
+## 🎓 The Dual Pedagogical Approach
 
+### Learning LLMs (LESSONS-LLM.md files)
+
+Each chapter includes a `LESSONS-LLM.md` file that covers:
+- Key concepts from the original book chapter
+- How these concepts prepare us for building transformers
+- Connections to broader ML/AI principles
+- Prerequisites for understanding future chapters
+
+### Learning Rust (LESSONS-RS.md files)
+
+Each chapter includes a `LESSONS-RS.md` file that covers:
+- Rust patterns and idioms demonstrated in the code
+- Systems programming concepts
+- Performance considerations
+- Common pitfalls and best practices
+- How Rust's features benefit ML implementations
+
+## 🤝 Contributing
+
+This is an educational project. We welcome contributions that:
+- Improve code clarity and educational value
+- Add detailed explanations to LESSONS files
+- Implement additional chapters from the book
+- Fix bugs or improve performance
+- Add tests and documentation
+
+## 📚 Resources
+
+### About the Original Book
+
+"Build a Large Language Model (From Scratch)" by Sebastian Raschka teaches:
 - Data preprocessing and tokenization
-- Transformer architecture implementation
+- Transformer architecture implementation  
 - Training and fine-tuning strategies
 - Practical applications
 
-For more information about the original book:
 - [Manning Publications](https://www.manning.com/books/build-a-large-language-model-from-scratch)
 - [Official GitHub Repository](https://github.com/rasbt/LLMs-from-scratch)
 
-## Contributing
+### Rust Learning Resources
 
-This is an educational project. Contributions that improve code clarity, add explanatory comments, or implement additional chapters are welcome.
+- [The Rust Programming Language Book](https://doc.rust-lang.org/book/)
+- [Rust by Example](https://doc.rust-lang.org/rust-by-example/)
+- [Async Programming in Rust](https://rust-lang.github.io/async-book/)
 
-## License
+## 📄 License
 
 This project follows the licensing terms of the original book's code examples. Please refer to the original repository for detailed licensing information.
 
-## Acknowledgments
+## 🙏 Acknowledgments
 
-- Sebastian Raschka for writing the original book and providing clear, educational examples
-- The Rust community for excellent documentation and libraries
-- Manning Publications for publishing this valuable educational resource
+- **Sebastian Raschka** for writing the original book and providing clear, educational examples
+- **The Rust Community** for excellent documentation and libraries
+- **Manning Publications** for publishing this valuable educational resource
+- **All Contributors** who help make this dual learning journey possible
