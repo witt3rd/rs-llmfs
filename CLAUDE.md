@@ -64,3 +64,8 @@ Key dependencies:
 - The workspace structure allows for easy addition of new chapters as translation progresses
 - Build artifacts are shared across all workspace members in the root `target/` directory
 - When implementing new chapters, maintain consistency with the book's educational approach while using Rust best practices
+
+## Documentation References
+
+- Rust CLI information can be found at: @docs\refs\rust\rust-cli-guide.md
+- Rust Cargo information can be found at: @docs\refs\rust\cargo.md
