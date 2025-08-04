@@ -69,6 +69,9 @@ enum SplitMethod {
     /// Split on whitespace, commas, and periods
     #[value(name = "punct")]
     Punctuation,
+    /// Split on all punctuation and whitespace
+    #[value(name = "all")]
+    All,
 }
 
 impl fmt::Display for SplitMethod {
@@ -76,6 +79,7 @@ impl fmt::Display for SplitMethod {
         match self {
             SplitMethod::Whitespace => write!(f, "whitespace"),
             SplitMethod::Punctuation => write!(f, "punctuation"),
+            SplitMethod::All => write!(f, "all"),
         }
     }
 }
@@ -385,6 +389,59 @@ fn punctuation_split(text: &str) -> Vec<Token> {
     result
 }
 
+/// Splits text on comprehensive punctuation and whitespace.
+///
+/// This replicates the book's Python example:
+/// ```python
+/// import re
+/// raw_text = "..."
+/// preprocessed = re.split(r'([,.:;?_!"()\']|--|\s)', raw_text)
+/// preprocessed = [item.strip() for item in preprocessed if item.strip()]
+/// print(len(preprocessed))
+/// ```
+///
+/// # Arguments
+///
+/// * `text` - The text to split
+///
+/// # Returns
+///
+/// * `Vec<Token>` - Vector of tokens (empty tokens are filtered out)
+fn all_split(text: &str) -> Vec<Token> {
+    // Create regex that matches comprehensive punctuation, double dash, or whitespace
+    let re = Regex::new(r#"([,.:;?_!"()']|--|\s)"#).unwrap();
+
+    // Split while keeping delimiters
+    let mut result = Vec::new();
+    let mut last_end = 0;
+
+    for mat in re.find_iter(text) {
+        // Add the text before the match (not a delimiter)
+        if mat.start() > last_end {
+            let content = text[last_end..mat.start()].trim().to_string();
+            if !content.is_empty() {
+                result.push(Token::new(content, false));
+            }
+        }
+        // Add the delimiter match itself (but strip and check if not empty)
+        let content = mat.as_str().trim().to_string();
+        if !content.is_empty() {
+            result.push(Token::new(content, true));
+        }
+        last_end = mat.end();
+    }
+
+    // Add any remaining text after the last match (not a delimiter)
+    if last_end < text.len() {
+        let content = text[last_end..].trim().to_string();
+        if !content.is_empty() {
+            result.push(Token::new(content, false));
+        }
+    }
+
+    result
+}
+
 /// Handles the split subcommand, demonstrating various text splitting methods.
 ///
 /// # Arguments
@@ -427,6 +484,13 @@ async fn handle_split(
             println!();
             punctuation_split(&text)
         }
+        SplitMethod::All => {
+            println!("  import re");
+            println!("  preprocessed = re.split(r'([,.:;?_!\"()\\']|--|\\s)', raw_text)");
+            println!("  preprocessed = [item.strip() for item in preprocessed if item.strip()]");
+            println!();
+            all_split(&text)
+        }
     };
 
     // Display results
@@ -444,14 +508,20 @@ async fn handle_split(
     println!();
     
     if tokens.len() <= max_display {
-        // Show all tokens inline
-        for token in &tokens {
+        // Show all tokens inline with visual separation
+        for (i, token) in tokens.iter().enumerate() {
+            if i > 0 {
+                print!(" ");  // Space between tokens
+            }
             print!("{}", token.display_inline(&colors));
         }
         println!();
     } else {
-        // Show limited tokens inline
-        for token in tokens.iter().take(max_display) {
+        // Show limited tokens inline with visual separation
+        for (i, token) in tokens.iter().take(max_display).enumerate() {
+            if i > 0 {
+                print!(" ");  // Space between tokens
+            }
             print!("{}", token.display_inline(&colors));
         }
         print!("{}", format!(" ... ({} more tokens)", tokens.len() - max_display).bright_black());
@@ -532,19 +602,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
             println!();
 
             // First show with example text
-            println!("Example with whitespace splitting:");
+            println!("Example 1: Whitespace splitting");
             handle_split(None, SplitMethod::Whitespace, 50).await?;
 
             println!();
-            println!("Example with punctuation splitting:");
-            println!("Python equivalent:");
-            println!("  result = re.split(r'([,.]|\\s)', text)");
-            println!();
+            println!("Example 2: Punctuation splitting");
             handle_split(None, SplitMethod::Punctuation, 50).await?;
 
             println!();
-            println!("Now with our downloaded text (first 50 tokens):");
-            handle_split(Some("the-verdict.txt".to_string()), SplitMethod::Punctuation, 50).await?;
+            println!("Example 3: All punctuation splitting (with trimming)");
+            handle_split(None, SplitMethod::All, 50).await?;
+
+            println!();
+            println!("Now with our downloaded text using 'all' method (first 50 tokens):");
+            handle_split(Some("the-verdict.txt".to_string()), SplitMethod::All, 50).await?;
 
             println!("\n=== Demo Complete ===");
             println!(
