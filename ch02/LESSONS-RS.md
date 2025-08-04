@@ -230,26 +230,33 @@ Key concepts:
 ### Visual Token Display Pattern
 
 ```rust
-// Simple token structure for naive splitting
+// Token structure that represents split results
 struct Token {
     content: String,
-    is_whitespace: bool,
+    is_delimiter: bool,  // true if this token was a split delimiter
 }
 
 impl Token {
-    fn display_inline(&self) -> ColoredString {
-        if self.is_whitespace {
-            // Make whitespace visible with background color
-            match self.content.as_str() {
-                "\n" => "↵\n".on_bright_white().black(),
-                "\t" => "→".on_bright_white().black(),
-                _ => self.content.on_bright_white().black(),
-            }
+    fn display_inline(&self, colors: &ColorScheme) -> ColoredString {
+        if self.is_delimiter {
+            // Special display for whitespace characters
+            let display = match self.content.as_str() {
+                "\n" => "↵\n",
+                "\t" => "→",
+                "\r" => "↵",
+                _ => &self.content,
+            };
+            colors.style_delimiter(display)
         } else {
-            // Non-whitespace tokens get colored background
-            self.content.on_blue().white()
+            colors.style_text(&self.content)
         }
     }
+}
+
+// Usage with centralized colors
+let colors = ColorScheme::default();
+for token in &tokens {
+    print!("{}", token.display_inline(&colors));
 }
 ```
 
@@ -259,7 +266,57 @@ This creates a visual "syntax highlighting" effect where:
 - Special characters (newlines, tabs) show symbols
 - Output is compact and scannable
 
-### 11. **Enums vs Strings for CLI Arguments**
+### 11. **Centralizing Configuration with Structs**
+
+```rust
+// ❌ Avoid: Hardcoding values throughout the code
+fn display_token(&self) -> ColoredString {
+    if self.is_delimiter {
+        self.content.on_bright_white().black()  // Hardcoded colors
+    } else {
+        self.content.on_blue().white()  // Hardcoded colors
+    }
+}
+
+// ✅ Prefer: Centralized configuration
+struct ColorScheme {
+    text_bg: Color,
+    text_fg: Color,
+    delimiter_bg: Color,
+    delimiter_fg: Color,
+}
+
+impl ColorScheme {
+    fn default() -> Self {
+        ColorScheme {
+            text_bg: Color::Blue,
+            text_fg: Color::White,
+            delimiter_bg: Color::BrightWhite,
+            delimiter_fg: Color::Black,
+        }
+    }
+    
+    fn style_text(&self, text: &str) -> ColoredString {
+        text.color(self.text_fg).on_color(self.text_bg)
+    }
+}
+```
+
+Benefits of centralized configuration:
+- **Single source of truth**: Change colors in one place
+- **Extensibility**: Easy to add themes or load from config files
+- **Testability**: Can inject different configurations
+- **DRY principle**: Don't Repeat Yourself
+- **Future-proof**: Can add CLI args like `--color-scheme dark`
+
+This pattern applies to any repeated values:
+- Color schemes
+- API endpoints
+- Default sizes/limits
+- File paths
+- Any "magic numbers" or strings
+
+### 12. **Enums vs Strings for CLI Arguments**
 
 ```rust
 // ❌ Avoid: String-based configuration
@@ -385,6 +442,34 @@ let data = fetch_data();
 
 // GOOD: Await the future
 let data = fetch_data().await;
+```
+
+### 5. **Hardcoding Configuration Values**
+
+```rust
+// BAD: Magic values scattered throughout code
+fn render_header() {
+    println!("{}", "HEADER".on_blue().white());
+}
+
+fn render_error() {
+    println!("{}", "ERROR".on_red().white());
+}
+
+// GOOD: Centralized configuration
+struct Theme {
+    header_style: fn(&str) -> ColoredString,
+    error_style: fn(&str) -> ColoredString,
+}
+
+impl Theme {
+    fn default() -> Self {
+        Theme {
+            header_style: |s| s.on_blue().white(),
+            error_style: |s| s.on_red().white(),
+        }
+    }
+}
 ```
 
 ## Performance Notes

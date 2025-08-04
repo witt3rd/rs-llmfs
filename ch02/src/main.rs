@@ -30,49 +30,83 @@ use tokio::io::AsyncWriteExt; // Trait needed for .write_all() method
 
 // Note: No internal imports as this is a binary crate (main.rs)
 
+/// Color scheme for token display
+struct ColorScheme {
+    text_bg: Color,
+    text_fg: Color,
+    delimiter_bg: Color,
+    delimiter_fg: Color,
+}
+
+impl ColorScheme {
+    /// Default color scheme
+    fn default() -> Self {
+        ColorScheme {
+            text_bg: Color::Blue,
+            text_fg: Color::White,
+            delimiter_bg: Color::BrightWhite,
+            delimiter_fg: Color::Black,
+        }
+    }
+    
+    /// Apply text token colors
+    fn style_text(&self, text: &str) -> ColoredString {
+        text.color(self.text_fg).on_color(self.text_bg)
+    }
+    
+    /// Apply delimiter token colors
+    fn style_delimiter(&self, text: &str) -> ColoredString {
+        text.color(self.delimiter_fg).on_color(self.delimiter_bg)
+    }
+}
+
 /// Splitting method for text tokenization
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 enum SplitMethod {
-    /// Naive whitespace splitting (preserves delimiters)
-    Naive,
+    /// Split on whitespace only
+    #[value(name = "ws")]
+    Whitespace,
+    /// Split on whitespace, commas, and periods
+    #[value(name = "punct")]
+    Punctuation,
 }
 
 impl fmt::Display for SplitMethod {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SplitMethod::Naive => write!(f, "naive"),
+            SplitMethod::Whitespace => write!(f, "whitespace"),
+            SplitMethod::Punctuation => write!(f, "punctuation"),
         }
     }
 }
 
-/// A simple token for naive splitting (just text vs whitespace)
+/// A token from splitting (either text or delimiter)
 #[derive(Debug, Clone)]
 struct Token {
     content: String,
-    is_whitespace: bool,
+    is_delimiter: bool,
 }
 
 impl Token {
     /// Create a new token
-    fn new(content: String) -> Self {
-        let is_whitespace = content.chars().all(|c| c.is_whitespace());
-        Token { content, is_whitespace }
+    fn new(content: String, is_delimiter: bool) -> Self {
+        Token { content, is_delimiter }
     }
     
     /// Display the token inline with background highlighting
-    fn display_inline(&self) -> ColoredString {
-        if self.is_whitespace {
-            // Use visible representation for special whitespace
+    fn display_inline(&self, colors: &ColorScheme) -> ColoredString {
+        if self.is_delimiter {
+            // Delimiters get highlighted to show what was split on
             let display = match self.content.as_str() {
                 "\n" => "↵\n",  // Show newline symbol then actual newline
                 "\t" => "→",    // Tab arrow
                 "\r" => "↵",    // Carriage return
-                _ => &self.content,  // Regular spaces
+                _ => &self.content,
             };
-            display.on_bright_white().black()
+            colors.style_delimiter(display)
         } else {
-            // All non-whitespace tokens get blue background
-            self.content.on_blue().white()
+            // Non-delimiter text tokens
+            colors.style_text(&self.content)
         }
     }
 }
@@ -112,7 +146,7 @@ enum Commands {
         file_path: Option<String>,
 
         /// Method to use for splitting
-        #[arg(short, long, value_enum, default_value = "naive")]
+        #[arg(short, long, value_enum, default_value = "ws")]
         method: SplitMethod,
 
         /// Maximum number of tokens to display
@@ -259,7 +293,7 @@ async fn analyze_text(file_path: &str, preview_length: usize) -> Result<(), Box<
     Ok(())
 }
 
-/// Splits text using a naive whitespace approach.
+/// Splits text on whitespace only.
 ///
 /// This replicates the book's Python example:
 /// ```python
@@ -276,7 +310,7 @@ async fn analyze_text(file_path: &str, preview_length: usize) -> Result<(), Box<
 /// # Returns
 ///
 /// * `Vec<Token>` - Vector of tokens including whitespace
-fn naive_split(text: &str) -> Vec<Token> {
+fn whitespace_split(text: &str) -> Vec<Token> {
     // Create regex that matches whitespace
     let re = Regex::new(r"\s").unwrap();
 
@@ -285,21 +319,67 @@ fn naive_split(text: &str) -> Vec<Token> {
     let mut last_end = 0;
 
     for mat in re.find_iter(text) {
-        // Add the text before the match
+        // Add the text before the match (not a delimiter)
         if mat.start() > last_end {
             let content = text[last_end..mat.start()].to_string();
-            result.push(Token::new(content));
+            result.push(Token::new(content, false));
         }
-        // Add the whitespace match itself
+        // Add the whitespace match itself (is a delimiter)
         let content = mat.as_str().to_string();
-        result.push(Token::new(content));
+        result.push(Token::new(content, true));
         last_end = mat.end();
     }
 
-    // Add any remaining text after the last match
+    // Add any remaining text after the last match (not a delimiter)
     if last_end < text.len() {
         let content = text[last_end..].to_string();
-        result.push(Token::new(content));
+        result.push(Token::new(content, false));
+    }
+
+    result
+}
+
+/// Splits text on whitespace, commas, and periods.
+///
+/// This replicates the book's Python example:
+/// ```python
+/// import re
+/// text = "Hello, world. This, is a test."
+/// result = re.split(r'([,.]|\s)', text)
+/// print(result)
+/// ```
+///
+/// # Arguments
+///
+/// * `text` - The text to split
+///
+/// # Returns
+///
+/// * `Vec<Token>` - Vector of tokens including delimiters
+fn punctuation_split(text: &str) -> Vec<Token> {
+    // Create regex that matches whitespace, commas, or periods
+    let re = Regex::new(r"([,.]|\s)").unwrap();
+
+    // Split while keeping delimiters - this mimics Python's re.split with capturing group
+    let mut result = Vec::new();
+    let mut last_end = 0;
+
+    for mat in re.find_iter(text) {
+        // Add the text before the match (not a delimiter)
+        if mat.start() > last_end {
+            let content = text[last_end..mat.start()].to_string();
+            result.push(Token::new(content, false));
+        }
+        // Add the delimiter match itself (whitespace, comma, or period)
+        let content = mat.as_str().to_string();
+        result.push(Token::new(content, true));
+        last_end = mat.end();
+    }
+
+    // Add any remaining text after the last match (not a delimiter)
+    if last_end < text.len() {
+        let content = text[last_end..].to_string();
+        result.push(Token::new(content, false));
     }
 
     result
@@ -335,11 +415,17 @@ async fn handle_split(
     println!("Python equivalent:");
 
     let tokens = match method {
-        SplitMethod::Naive => {
+        SplitMethod::Whitespace => {
             println!("  import re");
             println!("  result = re.split(r'(\\s)', text)");
             println!();
-            naive_split(&text)
+            whitespace_split(&text)
+        }
+        SplitMethod::Punctuation => {
+            println!("  import re");
+            println!("  result = re.split(r'([,.]|\\s)', text)");
+            println!();
+            punctuation_split(&text)
         }
     };
 
@@ -347,23 +433,26 @@ async fn handle_split(
     println!("Total tokens: {}", tokens.len().to_string().bold());
     println!();
     
+    // Create color scheme
+    let colors = ColorScheme::default();
+    
     // Display tokens inline with highlighting
     println!("Tokenized text ({} {} tokens):",
-        "text".on_blue().white(),
-        "whitespace".on_bright_white().black()
+        colors.style_text("text"),
+        colors.style_delimiter("delimiters")
     );
     println!();
     
     if tokens.len() <= max_display {
         // Show all tokens inline
         for token in &tokens {
-            print!("{}", token.display_inline());
+            print!("{}", token.display_inline(&colors));
         }
         println!();
     } else {
         // Show limited tokens inline
         for token in tokens.iter().take(max_display) {
-            print!("{}", token.display_inline());
+            print!("{}", token.display_inline(&colors));
         }
         print!("{}", format!(" ... ({} more tokens)", tokens.len() - max_display).bright_black());
         println!();
@@ -443,12 +532,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
             println!();
 
             // First show with example text
-            println!("Example with simple text:");
-            handle_split(None, SplitMethod::Naive, 50).await?;
+            println!("Example with whitespace splitting:");
+            handle_split(None, SplitMethod::Whitespace, 50).await?;
+
+            println!();
+            println!("Example with punctuation splitting:");
+            println!("Python equivalent:");
+            println!("  result = re.split(r'([,.]|\\s)', text)");
+            println!();
+            handle_split(None, SplitMethod::Punctuation, 50).await?;
 
             println!();
             println!("Now with our downloaded text (first 50 tokens):");
-            handle_split(Some("the-verdict.txt".to_string()), SplitMethod::Naive, 50).await?;
+            handle_split(Some("the-verdict.txt".to_string()), SplitMethod::Punctuation, 50).await?;
 
             println!("\n=== Demo Complete ===");
             println!(
