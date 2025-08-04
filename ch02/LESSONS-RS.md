@@ -87,6 +87,7 @@ use reqwest::Client;  // Mixing module and type imports
 ```
 
 Key principles for teaching:
+
 - **Be explicit**: Clear imports help readers understand dependencies
 - **Follow conventions**: Functions via modules, types directly
 - **Group logically**: Three sections with blank lines between
@@ -205,6 +206,45 @@ match args.command {
 - Compile-time completeness checking
 - Clear control flow
 
+### 10. **Enums vs Strings for CLI Arguments**
+
+```rust
+// ❌ Avoid: String-based configuration
+#[arg(short, long, default_value = "naive")]
+method: String,
+// Requires runtime validation and error handling
+
+// ✅ Prefer: Enum with clap's ValueEnum
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum SplitMethod {
+    /// Naive whitespace splitting (preserves delimiters)
+    Naive,
+}
+
+#[arg(short, long, value_enum, default_value = "naive")]
+method: SplitMethod,
+```
+
+Benefits of using enums:
+
+- **Type safety**: Compiler ensures only valid values
+- **Auto-completion**: IDEs suggest valid options
+- **Help generation**: `--help` shows all possible values with descriptions
+- **Exhaustive matching**: No need for default error cases
+- **Easy extensibility**: Add variants to extend functionality
+
+Implement Display for user-friendly output:
+
+```rust
+impl fmt::Display for SplitMethod {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SplitMethod::Naive => write!(f, "naive"),
+        }
+    }
+}
+```
+
 ## Patterns and Idioms
 
 ### Subcommand Architecture
@@ -249,7 +289,21 @@ pb.set_style(ProgressStyle::default_bar()
 
 ## Common Pitfalls
 
-### 1. **Blocking in Async Code**
+### 1. **Using Strings Where Enums Are Better**
+
+```rust
+// BAD: String comparison prone to typos
+if method == "navie" {  // Typo won't be caught!
+    naive_split(&text)
+}
+
+// GOOD: Enum prevents typos at compile time
+match method {
+    SplitMethod::Naive => naive_split(&text),
+}
+```
+
+### 2. **Blocking in Async Code**
 
 ```rust
 // BAD: Blocks the async runtime
@@ -270,7 +324,7 @@ let size = response.content_length()
     .ok_or("No content length")?;
 ```
 
-### 3. **Forgetting `.await`**
+### 4. **Forgetting `.await`**
 
 ```rust
 // BAD: This is a Future, not the result!

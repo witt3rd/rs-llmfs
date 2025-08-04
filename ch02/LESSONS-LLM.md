@@ -33,6 +33,7 @@ print(raw_text[:99])
 ```
 
 Key metrics to examine:
+
 - **Character count**: Total size of the text
 - **Line count**: Structure of the document
 - **Word count**: Vocabulary size estimation
@@ -86,22 +87,29 @@ To fully understand this chapter, you should be familiar with:
 Our Rust implementation provides three key capabilities:
 
 ### 1. **Guided Demo Mode**
+
 Replicates the exact book examples:
+
 ```bash
 cargo run -p ch02 -- demo
 ```
-- Downloads "the-verdict.txt" 
+
+- Downloads "the-verdict.txt"
 - Analyzes with 99-character preview
 - Shows Python equivalents for learning
 
 ### 2. **Generic Download Tool**
+
 For experimenting with different texts:
+
 ```bash
 cargo run -p ch02 -- download <URL> <output-path>
 ```
 
 ### 3. **Text Analysis Tool**
+
 For examining any text file:
+
 ```bash
 cargo run -p ch02 -- analyze <file-path> --preview-length 200
 ```
