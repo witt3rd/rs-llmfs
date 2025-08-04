@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 
 // External crate imports (alphabetically sorted)
 use clap::{Parser, Subcommand};
+use colored::*;  // Glob import acceptable for color traits
 use regex::Regex;
 use reqwest;  // Import module for functions
 use tokio::fs;  // Import module for functions
@@ -206,7 +207,59 @@ match args.command {
 - Compile-time completeness checking
 - Clear control flow
 
-### 10. **Enums vs Strings for CLI Arguments**
+### 10. **Terminal Colors with the `colored` Crate**
+
+```rust
+use colored::*;
+
+// Basic text coloring
+println!("{}", "Hello".blue());
+println!("{}", "World".red().bold());
+
+// Background colors for visual highlighting
+println!("{}", "Token".on_blue().white());
+println!("{}", " ".on_bright_white().black());  // Visualize whitespace
+```
+
+Key concepts:
+- **Method chaining**: `"text".blue().bold().underline()`
+- **Foreground/background**: `.red()` vs `.on_red()`
+- **Brightness variants**: `.bright_black()` for subtle text
+- **Cross-platform**: Works on Windows, macOS, and Linux
+
+### Visual Token Display Pattern
+
+```rust
+// Simple token structure for naive splitting
+struct Token {
+    content: String,
+    is_whitespace: bool,
+}
+
+impl Token {
+    fn display_inline(&self) -> ColoredString {
+        if self.is_whitespace {
+            // Make whitespace visible with background color
+            match self.content.as_str() {
+                "\n" => "↵\n".on_bright_white().black(),
+                "\t" => "→".on_bright_white().black(),
+                _ => self.content.on_bright_white().black(),
+            }
+        } else {
+            // Non-whitespace tokens get colored background
+            self.content.on_blue().white()
+        }
+    }
+}
+```
+
+This creates a visual "syntax highlighting" effect where:
+- Text tokens appear with colored backgrounds
+- Whitespace is visually distinct
+- Special characters (newlines, tabs) show symbols
+- Output is compact and scannable
+
+### 11. **Enums vs Strings for CLI Arguments**
 
 ```rust
 // ❌ Avoid: String-based configuration
@@ -313,7 +366,7 @@ std::fs::read_to_string("file.txt")?;
 tokio::fs::read_to_string("file.txt").await?;
 ```
 
-### 2. **Not Handling All Error Cases**
+### 3. **Not Handling All Error Cases**
 
 ```rust
 // BAD: Assumes content_length exists

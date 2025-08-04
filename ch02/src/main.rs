@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf}; // Types imported directly
 
 // External crate imports (alphabetically sorted)
 use clap::{Parser, Subcommand}; // Derive macro traits
+use colored::*; // Colors for terminal output
 use futures_util::StreamExt; // Trait needed for .next() on streams
 use indicatif::{ProgressBar, ProgressStyle}; // Types imported directly
 use regex::Regex; // Type imported directly
@@ -40,6 +41,38 @@ impl fmt::Display for SplitMethod {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SplitMethod::Naive => write!(f, "naive"),
+        }
+    }
+}
+
+/// A simple token for naive splitting (just text vs whitespace)
+#[derive(Debug, Clone)]
+struct Token {
+    content: String,
+    is_whitespace: bool,
+}
+
+impl Token {
+    /// Create a new token
+    fn new(content: String) -> Self {
+        let is_whitespace = content.chars().all(|c| c.is_whitespace());
+        Token { content, is_whitespace }
+    }
+    
+    /// Display the token inline with background highlighting
+    fn display_inline(&self) -> ColoredString {
+        if self.is_whitespace {
+            // Use visible representation for special whitespace
+            let display = match self.content.as_str() {
+                "\n" => "↵\n",  // Show newline symbol then actual newline
+                "\t" => "→",    // Tab arrow
+                "\r" => "↵",    // Carriage return
+                _ => &self.content,  // Regular spaces
+            };
+            display.on_bright_white().black()
+        } else {
+            // All non-whitespace tokens get blue background
+            self.content.on_blue().white()
         }
     }
 }
@@ -242,8 +275,8 @@ async fn analyze_text(file_path: &str, preview_length: usize) -> Result<(), Box<
 ///
 /// # Returns
 ///
-/// * `Vec<String>` - Vector of tokens including whitespace
-fn naive_split(text: &str) -> Vec<String> {
+/// * `Vec<Token>` - Vector of tokens including whitespace
+fn naive_split(text: &str) -> Vec<Token> {
     // Create regex that matches whitespace
     let re = Regex::new(r"\s").unwrap();
 
@@ -254,16 +287,19 @@ fn naive_split(text: &str) -> Vec<String> {
     for mat in re.find_iter(text) {
         // Add the text before the match
         if mat.start() > last_end {
-            result.push(text[last_end..mat.start()].to_string());
+            let content = text[last_end..mat.start()].to_string();
+            result.push(Token::new(content));
         }
         // Add the whitespace match itself
-        result.push(mat.as_str().to_string());
+        let content = mat.as_str().to_string();
+        result.push(Token::new(content));
         last_end = mat.end();
     }
 
     // Add any remaining text after the last match
     if last_end < text.len() {
-        result.push(text[last_end..].to_string());
+        let content = text[last_end..].to_string();
+        result.push(Token::new(content));
     }
 
     result
@@ -308,40 +344,29 @@ async fn handle_split(
     };
 
     // Display results
-    println!("Total tokens: {}", tokens.len());
+    println!("Total tokens: {}", tokens.len().to_string().bold());
     println!();
-
+    
+    // Display tokens inline with highlighting
+    println!("Tokenized text ({} {} tokens):",
+        "text".on_blue().white(),
+        "whitespace".on_bright_white().black()
+    );
+    println!();
+    
     if tokens.len() <= max_display {
-        println!("Tokens:");
-        for (i, token) in tokens.iter().enumerate() {
-            if token.is_empty() {
-                println!("  [{}]: <empty>", i);
-            } else if token.chars().all(|c| c.is_whitespace()) {
-                let display = token
-                    .replace('\n', "\\n")
-                    .replace('\r', "\\r")
-                    .replace('\t', "\\t");
-                println!("  [{}]: <whitespace: '{}'>", i, display);
-            } else {
-                println!("  [{}]: '{}'", i, token);
-            }
+        // Show all tokens inline
+        for token in &tokens {
+            print!("{}", token.display_inline());
         }
+        println!();
     } else {
-        println!("First {} tokens:", max_display);
-        for (i, token) in tokens.iter().take(max_display).enumerate() {
-            if token.is_empty() {
-                println!("  [{}]: <empty>", i);
-            } else if token.chars().all(|c| c.is_whitespace()) {
-                let display = token
-                    .replace('\n', "\\n")
-                    .replace('\r', "\\r")
-                    .replace('\t', "\\t");
-                println!("  [{}]: <whitespace: '{}'>", i, display);
-            } else {
-                println!("  [{}]: '{}'", i, token);
-            }
+        // Show limited tokens inline
+        for token in tokens.iter().take(max_display) {
+            print!("{}", token.display_inline());
         }
-        println!("  ... ({} more tokens)", tokens.len() - max_display);
+        print!("{}", format!(" ... ({} more tokens)", tokens.len() - max_display).bright_black());
+        println!();
     }
 
     Ok(())
