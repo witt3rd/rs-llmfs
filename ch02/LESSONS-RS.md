@@ -2,7 +2,99 @@
 
 ## Rust Concepts Introduced
 
-### 1. **Async/Await Programming**
+### 1. **Import Conventions and Best Practices**
+
+#### Import Organization (Three Sections)
+
+```rust
+// Standard library imports (alphabetically sorted)
+use std::cmp::min;
+use std::error::Error;
+use std::path::{Path, PathBuf};
+
+// External crate imports (alphabetically sorted)
+use clap::{Parser, Subcommand};
+use regex::Regex;
+use reqwest;  // Import module for functions
+use tokio::fs;  // Import module for functions
+use tokio::io::AsyncWriteExt;  // Import trait to use its methods
+
+// Internal/local imports (when in library code)
+use crate::config::Config;
+use crate::utils::helpers;
+```
+
+#### Functions vs Types Convention
+
+**Critical distinction** that many Rust developers miss:
+
+```rust
+// For FUNCTIONS: Import the parent module
+use std::fs;  // ✅ Good
+use std::io;  // ✅ Good
+
+// Usage
+let contents = fs::read_to_string("file.txt")?;
+io::stdin().read_line(&mut buffer)?;
+
+// For TYPES: Import the item directly
+use std::collections::HashMap;  // ✅ Good
+use std::path::PathBuf;        // ✅ Good
+
+// Usage
+let map = HashMap::new();
+let path = PathBuf::from("/home");
+```
+
+#### Trait Imports
+
+Traits must be in scope to use their methods:
+
+```rust
+use std::io::Read;  // Required to call .read_to_string()
+use tokio::io::AsyncWriteExt;  // Required to call .write_all()
+
+// Now you can use trait methods
+file.read_to_string(&mut contents)?;
+file.write_all(&chunk).await?;
+```
+
+#### Handling Name Conflicts
+
+```rust
+// Use 'as' for renaming
+use std::fmt::Result;
+use std::io::Result as IoResult;
+
+// Or import the module to qualify
+use std::fmt;
+use std::io;
+// Then use: fmt::Result and io::Result
+```
+
+#### What to Avoid
+
+```rust
+// ❌ Avoid glob imports (except in tests/preludes)
+use some_module::*;
+
+// ❌ Avoid deep function imports
+use std::fs::read_to_string;  // Import fs instead
+
+// ❌ Avoid inconsistent patterns
+use reqwest;  // If you only use reqwest::get
+use reqwest::Client;  // Mixing module and type imports
+```
+
+Key principles for teaching:
+- **Be explicit**: Clear imports help readers understand dependencies
+- **Follow conventions**: Functions via modules, types directly
+- **Group logically**: Three sections with blank lines between
+- **Import traits**: When you need their methods
+- **Avoid globs**: Except for designed preludes and test modules
+- **Stay consistent**: Pick a pattern and stick with it
+
+### 2. **Async/Await Programming**
 
 ```rust
 async fn download_file(url: &str, local_dir: &str) -> Result<(), Box<dyn std::error::Error>>
@@ -13,7 +105,7 @@ async fn download_file(url: &str, local_dir: &str) -> Result<(), Box<dyn std::er
 - Non-blocking I/O allows other tasks to run while waiting
 - Requires an async runtime (we use Tokio)
 
-### 2. **The Tokio Runtime**
+### 3. **The Tokio Runtime**
 
 ```rust
 #[tokio::main]
@@ -25,10 +117,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>
 - Provides async versions of file/network operations
 - Full featured runtime with work-stealing scheduler
 
-### 3. **Error Handling with `?` Operator**
+### 4. **Error Handling with `?` Operator**
 
 ```rust
-let response = reqwest::get(url).await?;
+let response = http_get(url).await?;
 ```
 
 - Propagates errors up the call stack
@@ -36,7 +128,7 @@ let response = reqwest::get(url).await?;
 - Cleaner than explicit `match` statements
 - Requires function to return `Result`
 
-### 4. **Trait Objects: `Box<dyn Error>`**
+### 5. **Trait Objects: `Box<dyn Error>`**
 
 ```rust
 Result<(), Box<dyn std::error::Error>>
@@ -47,7 +139,7 @@ Result<(), Box<dyn std::error::Error>>
 - Allows returning different error types
 - Trade-off: flexibility vs. performance
 
-### 5. **CLI Parsing with Clap**
+### 6. **CLI Parsing with Clap**
 
 ```rust
 #[derive(Parser, Debug)]
@@ -70,7 +162,7 @@ enum Commands {
 - Type-safe argument parsing with enums
 - Automatic help generation for each subcommand
 
-### 6. **Streaming I/O**
+### 7. **Streaming I/O**
 
 ```rust
 let mut stream = response.bytes_stream();
@@ -85,7 +177,7 @@ while let Some(item) = stream.next().await {
 - `StreamExt` trait provides combinators
 - Backpressure handling built-in
 
-### 7. **Async File I/O with UTF-8**
+### 8. **Async File I/O with UTF-8**
 
 ```rust
 let raw_text = fs::read_to_string(file_path).await?;
@@ -98,7 +190,7 @@ let preview: String = raw_text.chars().take(99).collect();
 - `chars()` iterator respects Unicode boundaries
 - Efficient string slicing with iterators
 
-### 8. **Pattern Matching with Enums**
+### 9. **Pattern Matching with Enums**
 
 ```rust
 match args.command {

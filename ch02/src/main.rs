@@ -12,14 +12,21 @@
 //! - CLI argument parsing
 //! - Progress bars and visual feedback
 
-use clap::{Parser, Subcommand};
-use futures_util::StreamExt;
-use indicatif::{ProgressBar, ProgressStyle};
-use reqwest;
+// Standard library imports (alphabetically sorted)
 use std::cmp::min;
-use std::path::{Path, PathBuf};
-use tokio::fs;
-use tokio::io::AsyncWriteExt;
+use std::error::Error;  // Import trait for Box<dyn Error>
+use std::path::{Path, PathBuf};  // Types imported directly
+
+// External crate imports (alphabetically sorted)
+use clap::{Parser, Subcommand};  // Derive macro traits
+use futures_util::StreamExt;  // Trait needed for .next() on streams
+use indicatif::{ProgressBar, ProgressStyle};  // Types imported directly
+use regex::Regex;  // Type imported directly
+use reqwest;  // Module import - we'll use reqwest::get() (function convention)
+use tokio::fs;  // Module import - we'll use fs::read_to_string() (function convention)
+use tokio::io::AsyncWriteExt;  // Trait needed for .write_all() method
+
+// Note: No internal imports as this is a binary crate (main.rs)
 
 /// A file downloader with progress reporting for LLM text data acquisition
 #[derive(Parser, Debug)]
@@ -50,6 +57,19 @@ enum Commands {
         #[arg(short, long, default_value = "99")]
         preview_length: usize,
     },
+    /// Split text using various methods
+    Split {
+        /// Path to the text file to split (or use test string if not provided)
+        file_path: Option<String>,
+        
+        /// Method to use for splitting
+        #[arg(short, long, default_value = "naive")]
+        method: String,
+        
+        /// Maximum number of tokens to display
+        #[arg(long, default_value = "50")]
+        max_display: usize,
+    },
 }
 
 /// Downloads a file from a URL with progress reporting.
@@ -68,7 +88,7 @@ enum Commands {
 /// - If output_path is a directory, the filename is extracted from the URL
 /// - If output_path is a file path, the file is saved with that exact name
 /// - Progress reporting shows download speed and estimated time remaining
-async fn download_file(url: &str, output_path: Option<&str>) -> Result<PathBuf, Box<dyn std::error::Error>> {
+async fn download_file(url: &str, output_path: Option<&str>) -> Result<PathBuf, Box<dyn Error>> {
     // Make an HTTP GET request to the URL
     let response = reqwest::get(url).await?;
     
@@ -156,7 +176,7 @@ async fn download_file(url: &str, output_path: Option<&str>) -> Result<PathBuf, 
 /// print("Total number of character:", len(raw_text))
 /// print(raw_text[:99])
 /// ```
-async fn analyze_text(file_path: &str, preview_length: usize) -> Result<(), Box<dyn std::error::Error>> {
+async fn analyze_text(file_path: &str, preview_length: usize) -> Result<(), Box<dyn Error>> {
     // Read the entire file content with UTF-8 encoding
     let raw_text = fs::read_to_string(file_path).await?;
     
@@ -187,6 +207,120 @@ async fn analyze_text(file_path: &str, preview_length: usize) -> Result<(), Box<
     Ok(())
 }
 
+/// Splits text using a naive whitespace approach.
+///
+/// This replicates the book's Python example:
+/// ```python
+/// import re
+/// text = "Hello, world. This, is a test."
+/// result = re.split(r'(\s)', text)
+/// print(result)
+/// ```
+///
+/// # Arguments
+/// 
+/// * `text` - The text to split
+///
+/// # Returns
+/// 
+/// * `Vec<String>` - Vector of tokens including whitespace
+fn naive_split(text: &str) -> Vec<String> {
+    // Create regex that matches whitespace
+    let re = Regex::new(r"\s").unwrap();
+    
+    // Split while keeping delimiters - this mimics Python's re.split with capturing group
+    let mut result = Vec::new();
+    let mut last_end = 0;
+    
+    for mat in re.find_iter(text) {
+        // Add the text before the match
+        if mat.start() > last_end {
+            result.push(text[last_end..mat.start()].to_string());
+        }
+        // Add the whitespace match itself
+        result.push(mat.as_str().to_string());
+        last_end = mat.end();
+    }
+    
+    // Add any remaining text after the last match
+    if last_end < text.len() {
+        result.push(text[last_end..].to_string());
+    }
+    
+    result
+}
+
+/// Handles the split subcommand, demonstrating various text splitting methods.
+///
+/// # Arguments
+/// 
+/// * `file_path` - Optional path to file, uses example text if None
+/// * `method` - The splitting method to use
+/// * `max_display` - Maximum number of tokens to display
+async fn handle_split(file_path: Option<String>, method: &str, max_display: usize) -> Result<(), Box<dyn Error>> {
+    // Get the text to split
+    let text = match file_path {
+        Some(path) => {
+            println!("Reading text from: {}", path);
+            fs::read_to_string(path).await?
+        }
+        None => {
+            let example = "Hello, world. This, is a test.";
+            println!("Using example text: \"{}\"", example);
+            example.to_string()
+        }
+    };
+    
+    println!();
+    println!("Splitting method: {}", method);
+    println!("Python equivalent:");
+    
+    let tokens = match method {
+        "naive" => {
+            println!("  import re");
+            println!("  result = re.split(r'(\\s)', text)");
+            println!();
+            naive_split(&text)
+        }
+        _ => {
+            return Err(format!("Unknown splitting method: {}", method).into());
+        }
+    };
+    
+    // Display results
+    println!("Total tokens: {}", tokens.len());
+    println!();
+    
+    if tokens.len() <= max_display {
+        println!("Tokens:");
+        for (i, token) in tokens.iter().enumerate() {
+            if token.is_empty() {
+                println!("  [{}]: <empty>", i);
+            } else if token.chars().all(|c| c.is_whitespace()) {
+                let display = token.replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t");
+                println!("  [{}]: <whitespace: '{}'>", i, display);
+            } else {
+                println!("  [{}]: '{}'", i, token);
+            }
+        }
+    } else {
+        println!("First {} tokens:", max_display);
+        for (i, token) in tokens.iter().take(max_display).enumerate() {
+            if token.is_empty() {
+                println!("  [{}]: <empty>", i);
+            } else if token.chars().all(|c| c.is_whitespace()) {
+                let display = token.replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t");
+                println!("  [{}]: <whitespace: '{}'>", i, display);
+            } else {
+                println!("  [{}]: '{}'", i, token);
+            }
+        }
+        println!("  ... ({} more tokens)", tokens.len() - max_display);
+    }
+    
+    Ok(())
+}
+
 /// The main entry point of our application.
 /// 
 /// This function:
@@ -194,7 +328,7 @@ async fn analyze_text(file_path: &str, preview_length: usize) -> Result<(), Box<
 /// 2. Executes the appropriate subcommand
 /// 3. Handles any errors that occur during execution
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn Error>> {
     // Parse command-line arguments
     let args = Args::parse();
     
@@ -245,11 +379,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             
             analyze_text("the-verdict.txt", 99).await?;
             
+            println!("\n✓ Analysis complete!");
+            println!();
+            
+            // Step 3: Demonstrate text splitting
+            println!("Step 3: Split text into tokens");
+            println!("Python equivalent:");
+            println!("  import re");
+            println!("  text = \"Hello, world. This, is a test.\"");
+            println!("  result = re.split(r'(\\s)', text)");
+            println!("  print(result)");
+            println!();
+            
+            // First show with example text
+            println!("Example with simple text:");
+            handle_split(None, "naive", 50).await?;
+            
+            println!();
+            println!("Now with our downloaded text (first 50 tokens):");
+            handle_split(Some("the-verdict.txt".to_string()), "naive", 50).await?;
+            
             println!("\n=== Demo Complete ===");
             println!("The file 'the-verdict.txt' is now ready for further text processing examples.");
         }
         Commands::Analyze { file_path, preview_length } => {
             analyze_text(&file_path, preview_length).await?;
+        }
+        Commands::Split { file_path, method, max_display } => {
+            handle_split(file_path, &method, max_display).await?;
         }
     }
     
