@@ -34,6 +34,7 @@ llmfs/
 ### Dual Learning Approach
 
 When implementing or modifying code:
+
 1. **Consider both pedagogical goals** - How does this teach LLM concepts AND Rust patterns?
 2. **Document learnings** - Update relevant LESSONS files when adding new concepts
 3. **Prefer clarity over cleverness** - Code should be educational first, optimized second
@@ -50,11 +51,13 @@ When implementing or modifying code:
 ## Common Commands
 
 ### Running a specific chapter
+
 ```bash
 cargo run -p ch02 -- --help
 ```
 
 ### Building and checking
+
 ```bash
 # Build all workspace members
 cargo build --workspace
@@ -67,6 +70,7 @@ cargo test --workspace
 ```
 
 ### Linting and formatting
+
 ```bash
 # Format code
 cargo fmt --all
@@ -81,6 +85,7 @@ cargo clippy --workspace -- -D warnings
 **Rust Focus**: Async programming, CLI tools, error handling, streaming I/O
 
 Current implementation includes:
+
 - CLI argument parsing with clap
 - Async file downloading with progress reporting
 - Streaming downloads for memory efficiency
@@ -88,6 +93,7 @@ Current implementation includes:
 - Visual progress bars with indicatif
 
 Key dependencies:
+
 - `clap` v4.5 - CLI argument parsing
 - `indicatif` v0.17 - Progress bars
 - `tokio` v1.47.1 - Async runtime
@@ -99,6 +105,7 @@ Key dependencies:
 ### LESSONS-LLM.md Structure
 
 Each LESSONS-LLM.md should contain:
+
 1. **Chapter Overview** - What LLM concepts are covered
 2. **Key Concepts** - Core ideas with explanations
 3. **Why This Matters** - How it connects to building complete LLMs
@@ -108,6 +115,7 @@ Each LESSONS-LLM.md should contain:
 ### LESSONS-RS.md Structure
 
 Each LESSONS-RS.md should contain:
+
 1. **Rust Concepts Introduced** - New language features used
 2. **Patterns and Idioms** - Best practices demonstrated
 3. **Common Pitfalls** - What to watch out for
@@ -136,3 +144,7 @@ Each LESSONS-RS.md should contain:
 
 - Rust CLI information can be found at: @docs\refs\rust\rust-cli-guide.md
 - Rust Cargo information can be found at: @docs\refs\rust\cargo.md
+
+## Rust Best Practices
+
+- Remember to follow Rust best practices documented at: @docs\refs\rust\rust-best-practices.md

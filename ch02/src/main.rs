@@ -14,6 +14,7 @@
 
 // Standard library imports (alphabetically sorted)
 use std::cmp::min;
+use std::collections::{HashMap, HashSet};
 use std::error::Error; // Import trait for Box<dyn Error>
 use std::fmt; // Module import - we'll use fmt::Display
 use std::path::{Path, PathBuf}; // Types imported directly
@@ -96,6 +97,18 @@ struct Token {
     is_delimiter: bool,
 }
 
+/// Simple tokenizer that converts between text and integer IDs
+struct SimpleTokenizerV1 {
+    str_to_int: HashMap<String, usize>,
+    int_to_str: HashMap<usize, String>,
+}
+
+/// Tokenizer V2 that handles unknown tokens with <|unk|>
+struct SimpleTokenizerV2 {
+    str_to_int: HashMap<String, usize>,
+    int_to_str: HashMap<usize, String>,
+}
+
 impl Token {
     /// Create a new token
     fn new(content: String, is_delimiter: bool) -> Self {
@@ -117,6 +130,176 @@ impl Token {
             // Non-delimiter text tokens
             colors.style_text(&self.content)
         }
+    }
+}
+
+impl SimpleTokenizerV1 {
+    /// Create a new tokenizer from a vocabulary mapping
+    fn new(vocab: HashMap<String, usize>) -> Self {
+        // Create the reverse mapping (int to string)
+        let int_to_str: HashMap<usize, String> = vocab
+            .iter()
+            .map(|(s, &i)| (i, s.clone()))
+            .collect();
+        
+        SimpleTokenizerV1 {
+            str_to_int: vocab,
+            int_to_str,
+        }
+    }
+    
+    /// Encode text into a sequence of token IDs
+    fn encode(&self, text: &str) -> Result<Vec<usize>, String> {
+        // Split text using comprehensive punctuation pattern
+        let re = Regex::new(r#"([,.:;?_!"()']|--|\s)"#).unwrap();
+        
+        // Split and filter empty strings
+        let mut preprocessed = Vec::new();
+        let mut last_end = 0;
+        
+        for mat in re.find_iter(text) {
+            // Add text before match
+            if mat.start() > last_end {
+                let content = text[last_end..mat.start()].trim();
+                if !content.is_empty() {
+                    preprocessed.push(content);
+                }
+            }
+            // Add the delimiter
+            let content = mat.as_str().trim();
+            if !content.is_empty() {
+                preprocessed.push(content);
+            }
+            last_end = mat.end();
+        }
+        
+        // Add remaining text
+        if last_end < text.len() {
+            let content = text[last_end..].trim();
+            if !content.is_empty() {
+                preprocessed.push(content);
+            }
+        }
+        
+        // Convert to IDs
+        let mut ids = Vec::new();
+        for token in preprocessed {
+            match self.str_to_int.get(token) {
+                Some(&id) => ids.push(id),
+                None => return Err(format!("Token '{}' not in vocabulary", token)),
+            }
+        }
+        
+        Ok(ids)
+    }
+    
+    /// Decode a sequence of token IDs back into text
+    fn decode(&self, ids: &[usize]) -> Result<String, String> {
+        // Convert IDs to strings
+        let mut tokens = Vec::new();
+        for &id in ids {
+            match self.int_to_str.get(&id) {
+                Some(token) => tokens.push(token.as_str()),
+                None => return Err(format!("ID {} not in vocabulary", id)),
+            }
+        }
+        
+        // Join with spaces
+        let mut text = tokens.join(" ");
+        
+        // Fix spacing around punctuation
+        let re = Regex::new(r#"\s+([,.?!"()'])"#).unwrap();
+        text = re.replace_all(&text, "$1").to_string();
+        
+        Ok(text)
+    }
+}
+
+impl SimpleTokenizerV2 {
+    /// Create a new tokenizer from a vocabulary mapping
+    fn new(vocab: HashMap<String, usize>) -> Self {
+        // Create the reverse mapping (int to string)
+        let int_to_str: HashMap<usize, String> = vocab
+            .iter()
+            .map(|(s, &i)| (i, s.clone()))
+            .collect();
+        
+        SimpleTokenizerV2 {
+            str_to_int: vocab,
+            int_to_str,
+        }
+    }
+    
+    /// Encode text into a sequence of token IDs, using <|unk|> for unknown tokens
+    fn encode(&self, text: &str) -> Vec<usize> {
+        // Split text using comprehensive punctuation pattern
+        let re = Regex::new(r#"([,.:;?_!"()']|--|\s)"#).unwrap();
+        
+        // Split and filter empty strings
+        let mut preprocessed = Vec::new();
+        let mut last_end = 0;
+        
+        for mat in re.find_iter(text) {
+            // Add text before match
+            if mat.start() > last_end {
+                let content = text[last_end..mat.start()].trim();
+                if !content.is_empty() {
+                    preprocessed.push(content);
+                }
+            }
+            // Add the delimiter
+            let content = mat.as_str().trim();
+            if !content.is_empty() {
+                preprocessed.push(content);
+            }
+            last_end = mat.end();
+        }
+        
+        // Add remaining text
+        if last_end < text.len() {
+            let content = text[last_end..].trim();
+            if !content.is_empty() {
+                preprocessed.push(content);
+            }
+        }
+        
+        // Replace unknown tokens with <|unk|> and convert to IDs
+        let mut ids = Vec::new();
+        for token in preprocessed {
+            let token_or_unk = if self.str_to_int.contains_key(token) {
+                token
+            } else {
+                "<|unk|>"
+            };
+            
+            // This should always succeed since we ensure <|unk|> is in vocabulary
+            if let Some(&id) = self.str_to_int.get(token_or_unk) {
+                ids.push(id);
+            }
+        }
+        
+        ids
+    }
+    
+    /// Decode a sequence of token IDs back into text
+    fn decode(&self, ids: &[usize]) -> Result<String, String> {
+        // Convert IDs to strings
+        let mut tokens = Vec::new();
+        for &id in ids {
+            match self.int_to_str.get(&id) {
+                Some(token) => tokens.push(token.as_str()),
+                None => return Err(format!("ID {} not in vocabulary", id)),
+            }
+        }
+        
+        // Join with spaces
+        let mut text = tokens.join(" ");
+        
+        // Fix spacing around punctuation
+        let re = Regex::new(r#"\s+([,.?!"()'])"#).unwrap();
+        text = re.replace_all(&text, "$1").to_string();
+        
+        Ok(text)
     }
 }
 
@@ -671,6 +854,241 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 print!("{}", format!(" ... ({} more tokens)", preprocessed.len() - 30).bright_black());
             }
             println!();
+
+            // Step 5: Create vocabulary from unique tokens
+            println!();
+            println!("Step 5: Create vocabulary from unique tokens");
+            println!("Python equivalent:");
+            println!("  all_words = sorted(set(preprocessed))");
+            println!("  vocab_size = len(all_words)");
+            println!("  print(vocab_size)");
+            println!();
+
+            // Create a set of unique words using HashSet
+            let unique_words: HashSet<&str> = preprocessed
+                .iter()
+                .map(|token| token.content.as_str())
+                .collect();
+            
+            let vocab_size = unique_words.len();
+            
+            // Convert to sorted vector for display
+            let mut sorted_words: Vec<&str> = unique_words.into_iter().collect();
+            sorted_words.sort();
+            println!("Vocabulary size: {}", vocab_size.to_string().bold());
+            println!();
+            
+            // Show first 50 words from vocabulary
+            println!("First 50 words from vocabulary (alphabetically sorted):");
+            println!();
+            
+            for (i, word) in sorted_words.iter().take(50).enumerate() {
+                if i > 0 && i % 10 == 0 {
+                    println!();  // New line every 10 words
+                }
+                print!("{:<12}", word);  // Left-aligned with 12 character width
+            }
+            
+            if sorted_words.len() > 50 {
+                println!();
+                println!("{}", format!("... ({} more words)", sorted_words.len() - 50).bright_black());
+            }
+            println!();
+            
+            // Step 6: Create tokenizer and demonstrate encode/decode
+            println!();
+            println!("Step 6: Create SimpleTokenizerV1 and demonstrate encode/decode");
+            println!("Python equivalent:");
+            println!("  vocab = {{token: idx for idx, token in enumerate(sorted_words)}}");
+            println!("  tokenizer = SimpleTokenizerV1(vocab)");
+            println!("  text = \"\"\"\"It's the last he painted, you know,\" ");
+            println!("         Mrs. Gisburn said with pardonable pride.\"\"\"");
+            println!("  ids = tokenizer.encode(text)");
+            println!("  decoded_text = tokenizer.decode(ids)");
+            println!();
+            
+            // Create vocabulary mapping from sorted unique words
+            let vocab: HashMap<String, usize> = sorted_words
+                .iter()
+                .enumerate()
+                .map(|(idx, &word)| (word.to_string(), idx))
+                .collect();
+            
+            let vocab_size = vocab.len();
+            println!("Created vocabulary with {} entries", vocab_size);
+            
+            // Create tokenizer
+            let tokenizer = SimpleTokenizerV1::new(vocab);
+            
+            // Example text from the book
+            let example_text = "\"It's the last he painted, you know,\" \n       Mrs. Gisburn said with pardonable pride.";
+            println!();
+            println!("Example text:");
+            println!("{}", example_text);
+            
+            // Encode the text
+            match tokenizer.encode(example_text) {
+                Ok(ids) => {
+                    println!();
+                    println!("Encoded IDs: {:?}", ids);
+                    println!("Number of tokens: {}", ids.len());
+                    
+                    // Decode back to text
+                    match tokenizer.decode(&ids) {
+                        Ok(decoded) => {
+                            println!();
+                            println!("Decoded text:");
+                            println!("{}", decoded);
+                            
+                            // Verify round-trip
+                            if decoded == example_text {
+                                println!("{}", "✓ Round-trip encoding/decoding successful!".green());
+                            } else {
+                                println!("{}", "⚠ Decoded text differs from original".yellow());
+                                println!("  Original:  \"{}\"", example_text);
+                                println!("  Decoded:   \"{}\"", decoded);
+                            }
+                        }
+                        Err(e) => println!("{}", format!("Error decoding: {}", e).red()),
+                    }
+                }
+                Err(e) => println!("{}", format!("Error encoding: {}", e).red()),
+            }
+            
+            // Step 7: Extend vocabulary with special tokens
+            println!();
+            println!("Step 7: Extend vocabulary with special tokens");
+            println!("Python equivalent:");
+            println!("  all_tokens = sorted(list(set(preprocessed)))");
+            println!("  all_tokens.extend([\"<|endoftext|>\", \"<|unk|>\"])");
+            println!("  vocab = {{token:integer for integer,token in enumerate(all_tokens)}}");
+            println!("  print(len(vocab.items()))");
+            println!();
+            
+            // Create a new vocabulary with special tokens
+            let mut all_tokens = sorted_words.clone();
+            all_tokens.push("<|endoftext|>");
+            all_tokens.push("<|unk|>");
+            
+            let vocab_with_special: HashMap<String, usize> = all_tokens
+                .iter()
+                .enumerate()
+                .map(|(idx, &word)| (word.to_string(), idx))
+                .collect();
+            
+            println!("Original vocabulary size: {}", vocab_size);
+            println!("Extended vocabulary size: {}", vocab_with_special.len());
+            
+            // Show the last five entries of the vocabulary
+            println!();
+            println!("Last five entries of the updated vocabulary:");
+            println!("Python equivalent:");
+            println!("  for i, item in enumerate(list(vocab.items())[-5:]):");
+            println!("      print(item)");
+            println!();
+            
+            // Get sorted vocabulary items to show last 5
+            let mut vocab_items: Vec<(&String, &usize)> = vocab_with_special.iter().collect();
+            vocab_items.sort_by_key(|&(_, &id)| id);
+            
+            for &(token, id) in vocab_items.iter().rev().take(5).rev() {
+                println!("('{}', {})", token, id);
+            }
+            
+            // Step 8: Create SimpleTokenizerV2 and test with unknown tokens
+            println!();
+            println!("Step 8: Create SimpleTokenizerV2 to handle unknown tokens");
+            println!("Python equivalent:");
+            println!("  tokenizer = SimpleTokenizerV2(vocab)");
+            println!("  text = \"Hello, do you like tea?\"");
+            println!("  print(tokenizer.encode(text))");
+            println!();
+            
+            // Create tokenizer V2 with extended vocabulary
+            let tokenizer_v2 = SimpleTokenizerV2::new(vocab_with_special);
+            
+            let new_text = "Hello, do you like tea?";
+            println!("New text: \"{}\"", new_text);
+            
+            let ids = tokenizer_v2.encode(new_text);
+            println!("Encoded IDs: {:?}", ids);
+            println!("Number of tokens: {}", ids.len());
+            
+            // Decode to show the result
+            match tokenizer_v2.decode(&ids) {
+                Ok(decoded) => {
+                    println!("Decoded text: \"{}\"", decoded);
+                    
+                    // Show which tokens were replaced with <|unk|>
+                    println!();
+                    println!("Token mapping:");
+                    let re = Regex::new(r#"([,.:;?_!"()']|--|\s)"#).unwrap();
+                    let mut tokens = Vec::new();
+                    let mut last_end = 0;
+                    
+                    for mat in re.find_iter(new_text) {
+                        if mat.start() > last_end {
+                            let content = new_text[last_end..mat.start()].trim();
+                            if !content.is_empty() {
+                                tokens.push(content);
+                            }
+                        }
+                        let content = mat.as_str().trim();
+                        if !content.is_empty() {
+                            tokens.push(content);
+                        }
+                        last_end = mat.end();
+                    }
+                    if last_end < new_text.len() {
+                        let content = new_text[last_end..].trim();
+                        if !content.is_empty() {
+                            tokens.push(content);
+                        }
+                    }
+                    
+                    for (token, &id) in tokens.iter().zip(ids.iter()) {
+                        let mapped = if tokenizer_v2.str_to_int.contains_key(*token) {
+                            token
+                        } else {
+                            "<|unk|>"
+                        };
+                        println!("  {} → {} (id: {})", token, mapped, id);
+                    }
+                }
+                Err(e) => println!("Error decoding: {}", e),
+            }
+            
+            // Step 9: Demonstrate joining multiple texts with <|endoftext|>
+            println!();
+            println!("Step 9: Join multiple texts with <|endoftext|> token");
+            println!("Python equivalent:");
+            println!("  text1 = \"Hello, do you like tea?\"");
+            println!("  text2 = \"In the sunlit terraces of the palace.\"");
+            println!("  text = \" <|endoftext|> \".join((text1, text2))");
+            println!("  print(text)");
+            println!("  print(tokenizer.encode(text))");
+            println!();
+            
+            let text1 = "Hello, do you like tea?";
+            let text2 = "In the sunlit terraces of the palace.";
+            let joined_text = format!("{} <|endoftext|> {}", text1, text2);
+            
+            println!("Text 1: \"{}\"", text1);
+            println!("Text 2: \"{}\"", text2);
+            println!("Joined text: \"{}\"", joined_text);
+            println!();
+            
+            let ids = tokenizer_v2.encode(&joined_text);
+            println!("Encoded IDs: {:?}", ids);
+            println!("Number of tokens: {}", ids.len());
+            
+            // Decode to verify
+            match tokenizer_v2.decode(&ids) {
+                Ok(decoded) => {
+                    println!("Decoded text: \"{}\"", decoded);
+                }
+                Err(e) => println!("Error decoding: {}", e),
+            }
 
             println!("\n=== Demo Complete ===");
             println!(
