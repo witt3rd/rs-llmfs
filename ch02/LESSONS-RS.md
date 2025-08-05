@@ -541,6 +541,59 @@ This chapter's patterns will be essential for:
 - **Training progress monitoring**
 - **Model checkpoint saving**
 
+### 13. **Smart Pointer Selection: Arc vs Vec**
+
+When returning collections of data that won't be modified, consider using `Arc<[T]>` instead of `Vec<T>`:
+
+```rust
+// ❌ Avoid: Returning Vec when data is immutable
+fn split_text(text: &str) -> Vec<Token> {
+    let mut tokens = Vec::new();
+    // ... build tokens ...
+    tokens  // Expensive to clone if shared
+}
+
+// ✅ Prefer: Return Arc for immutable, shareable data
+fn split_text(text: &str) -> Arc<[Token]> {
+    let mut tokens = Vec::new();
+    // ... build tokens ...
+    tokens.into()  // Convert Vec to Arc<[T]>
+}
+```
+
+Benefits of using `Arc<[T]>`:
+
+- **O(1) cloning**: Only increments reference count, no data copying
+- **Memory efficient**: 16 bytes (ptr + len) vs Vec's 24 bytes (ptr + len + capacity)
+- **Thread-safe sharing**: Can be sent between threads safely
+- **Immutability guarantee**: Type system prevents accidental modification
+- **Drop-in replacement**: Derefs to `&[T]`, works everywhere slices do
+
+When to use this pattern:
+
+```rust
+// Good candidates for Arc<[T]>:
+- Tokenization results that are shared across analyses
+- Configuration data loaded once, used everywhere
+- Parsed ASTs or intermediate representations
+- Any "build once, read many times" data
+
+// Keep using Vec<T> when:
+- Data needs modification after creation
+- Building incrementally (push/pop operations)
+- Single ownership is sufficient
+- Data is small or rarely cloned
+```
+
+Real-world impact:
+- Cloning a Vec with 10,000 tokens: ~80KB allocation + copy time
+- Cloning an Arc with 10,000 tokens: 8 bytes + atomic increment
+
+This pattern is especially valuable in LLM contexts where:
+- Token sequences are large (entire documents)
+- Multiple analyses run on the same tokens
+- Parallel processing shares data across threads
+
 ## Summary
 
 This chapter introduced fundamental Rust patterns through a practical tool. We learned:
@@ -549,5 +602,6 @@ This chapter introduced fundamental Rust patterns through a practical tool. We l
 - Async programming for efficient I/O
 - Error handling best practices
 - Memory-efficient streaming
+- Smart pointer selection for performance
 
 These concepts form the foundation for building larger systems in Rust, whether for machine learning or any other domain.

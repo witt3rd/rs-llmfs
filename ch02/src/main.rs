@@ -17,6 +17,7 @@ use std::cmp::min;
 use std::error::Error; // Import trait for Box<dyn Error>
 use std::fmt; // Module import - we'll use fmt::Display
 use std::path::{Path, PathBuf}; // Types imported directly
+use std::sync::Arc; // For efficient immutable data sharing
 
 // External crate imports (alphabetically sorted)
 use clap::{Parser, Subcommand}; // Derive macro traits
@@ -29,6 +30,10 @@ use tokio::fs; // Module import - we'll use fs::read_to_string() (function conve
 use tokio::io::AsyncWriteExt; // Trait needed for .write_all() method
 
 // Note: No internal imports as this is a binary crate (main.rs)
+
+// Constants for demo
+const VERDICT_FILENAME: &str = "data/the-verdict.txt";
+const VERDICT_URL: &str = "https://raw.githubusercontent.com/rasbt/LLMs-from-scratch/main/ch02/01_main-chapter-code/the-verdict.txt";
 
 /// Color scheme for token display
 struct ColorScheme {
@@ -48,12 +53,12 @@ impl ColorScheme {
             delimiter_fg: Color::Black,
         }
     }
-    
+
     /// Apply text token colors
     fn style_text(&self, text: &str) -> ColoredString {
         text.color(self.text_fg).on_color(self.text_bg)
     }
-    
+
     /// Apply delimiter token colors
     fn style_delimiter(&self, text: &str) -> ColoredString {
         text.color(self.delimiter_fg).on_color(self.delimiter_bg)
@@ -96,7 +101,7 @@ impl Token {
     fn new(content: String, is_delimiter: bool) -> Self {
         Token { content, is_delimiter }
     }
-    
+
     /// Display the token inline with background highlighting
     fn display_inline(&self, colors: &ColorScheme) -> ColoredString {
         if self.is_delimiter {
@@ -154,7 +159,7 @@ enum Commands {
         method: SplitMethod,
 
         /// Maximum number of tokens to display
-        #[arg(long, default_value = "50")]
+        #[arg(long, default_value = "30")]
         max_display: usize,
     },
 }
@@ -299,6 +304,10 @@ async fn analyze_text(file_path: &str, preview_length: usize) -> Result<(), Box<
 
 /// Splits text on whitespace only.
 ///
+/// Returns an `Arc<[Token]>` for efficient sharing of immutable token data.
+/// Since tokens are created once and then only read, using Arc avoids
+/// expensive cloning when sharing token lists between operations.
+///
 /// This replicates the book's Python example:
 /// ```python
 /// import re
@@ -313,8 +322,8 @@ async fn analyze_text(file_path: &str, preview_length: usize) -> Result<(), Box<
 ///
 /// # Returns
 ///
-/// * `Vec<Token>` - Vector of tokens including whitespace
-fn whitespace_split(text: &str) -> Vec<Token> {
+/// * `Arc<[Token]>` - Arc slice of tokens including whitespace
+fn whitespace_split(text: &str) -> Arc<[Token]> {
     // Create regex that matches whitespace
     let re = Regex::new(r"\s").unwrap();
 
@@ -340,7 +349,7 @@ fn whitespace_split(text: &str) -> Vec<Token> {
         result.push(Token::new(content, false));
     }
 
-    result
+    result.into()
 }
 
 /// Splits text on whitespace, commas, and periods.
@@ -359,8 +368,8 @@ fn whitespace_split(text: &str) -> Vec<Token> {
 ///
 /// # Returns
 ///
-/// * `Vec<Token>` - Vector of tokens including delimiters
-fn punctuation_split(text: &str) -> Vec<Token> {
+/// * `Arc<[Token]>` - Arc slice of tokens including delimiters
+fn punctuation_split(text: &str) -> Arc<[Token]> {
     // Create regex that matches whitespace, commas, or periods
     let re = Regex::new(r"([,.]|\s)").unwrap();
 
@@ -386,7 +395,7 @@ fn punctuation_split(text: &str) -> Vec<Token> {
         result.push(Token::new(content, false));
     }
 
-    result
+    result.into()
 }
 
 /// Splits text on comprehensive punctuation and whitespace.
@@ -406,8 +415,8 @@ fn punctuation_split(text: &str) -> Vec<Token> {
 ///
 /// # Returns
 ///
-/// * `Vec<Token>` - Vector of tokens (empty tokens are filtered out)
-fn all_split(text: &str) -> Vec<Token> {
+/// * `Arc<[Token]>` - Arc slice of tokens (empty tokens are filtered out)
+fn all_split(text: &str) -> Arc<[Token]> {
     // Create regex that matches comprehensive punctuation, double dash, or whitespace
     let re = Regex::new(r#"([,.:;?_!"()']|--|\s)"#).unwrap();
 
@@ -439,7 +448,25 @@ fn all_split(text: &str) -> Vec<Token> {
         }
     }
 
-    result
+    result.into()
+}
+
+/// Splits text using the specified method and returns tokens.
+///
+/// # Arguments
+///
+/// * `text` - The text to split
+/// * `method` - The splitting method to use
+///
+/// # Returns
+///
+/// * `Arc<[Token]>` - Arc slice of tokens from the split
+fn split_text(text: &str, method: SplitMethod) -> Arc<[Token]> {
+    match method {
+        SplitMethod::Whitespace => whitespace_split(text),
+        SplitMethod::Punctuation => punctuation_split(text),
+        SplitMethod::All => all_split(text),
+    }
 }
 
 /// Handles the split subcommand, demonstrating various text splitting methods.
@@ -471,42 +498,41 @@ async fn handle_split(
     println!("Splitting method: {}", method);
     println!("Python equivalent:");
 
-    let tokens = match method {
+    match method {
         SplitMethod::Whitespace => {
             println!("  import re");
             println!("  result = re.split(r'(\\s)', text)");
             println!();
-            whitespace_split(&text)
         }
         SplitMethod::Punctuation => {
             println!("  import re");
             println!("  result = re.split(r'([,.]|\\s)', text)");
             println!();
-            punctuation_split(&text)
         }
         SplitMethod::All => {
             println!("  import re");
             println!("  preprocessed = re.split(r'([,.:;?_!\"()\\']|--|\\s)', raw_text)");
             println!("  preprocessed = [item.strip() for item in preprocessed if item.strip()]");
             println!();
-            all_split(&text)
         }
-    };
+    }
+
+    let tokens = split_text(&text, method);
 
     // Display results
     println!("Total tokens: {}", tokens.len().to_string().bold());
     println!();
-    
+
     // Create color scheme
     let colors = ColorScheme::default();
-    
+
     // Display tokens inline with highlighting
     println!("Tokenized text ({} {} tokens):",
         colors.style_text("text"),
         colors.style_delimiter("delimiters")
     );
     println!();
-    
+
     if tokens.len() <= max_display {
         // Show all tokens inline with visual separation
         for (i, token) in tokens.iter().enumerate() {
@@ -572,8 +598,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             println!("  urllib.request.urlretrieve(url, file_path)");
             println!();
 
-            let url = "https://raw.githubusercontent.com/rasbt/LLMs-from-scratch/main/ch02/01_main-chapter-code/the-verdict.txt";
-            let _file_path = download_file(url, Some("the-verdict.txt")).await?;
+            let _file_path = download_file(VERDICT_URL, Some(VERDICT_FILENAME)).await?;
 
             println!("\n✓ Download complete!");
             println!();
@@ -587,7 +612,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             println!("  print(raw_text[:99])");
             println!();
 
-            analyze_text("the-verdict.txt", 99).await?;
+            analyze_text(VERDICT_FILENAME, 99).await?;
 
             println!("\n✓ Analysis complete!");
             println!();
@@ -603,23 +628,54 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             // First show with example text
             println!("Example 1: Whitespace splitting");
-            handle_split(None, SplitMethod::Whitespace, 50).await?;
+            handle_split(None, SplitMethod::Whitespace, 30).await?;
 
             println!();
             println!("Example 2: Punctuation splitting");
-            handle_split(None, SplitMethod::Punctuation, 50).await?;
+            handle_split(None, SplitMethod::Punctuation, 30).await?;
 
             println!();
             println!("Example 3: All punctuation splitting (with trimming)");
-            handle_split(None, SplitMethod::All, 50).await?;
+            handle_split(None, SplitMethod::All, 30).await?;
 
             println!();
-            println!("Now with our downloaded text using 'all' method (first 50 tokens):");
-            handle_split(Some("the-verdict.txt".to_string()), SplitMethod::All, 50).await?;
+            println!("Step 4: Apply comprehensive splitting to the downloaded text");
+            println!("Python equivalent:");
+            println!("  preprocessed = re.split(r'([,.:;?_!\"()\\']|--|\\s)', raw_text)");
+            println!("  preprocessed = [item.strip() for item in preprocessed if item.strip()]");
+            println!("  print(len(preprocessed))");
+            println!();
+
+            // Read the entire file and apply comprehensive splitting
+            let raw_text = fs::read_to_string(VERDICT_FILENAME).await?;
+            let preprocessed = split_text(&raw_text, SplitMethod::All);
+
+            println!("Total tokens after splitting: {}", preprocessed.len().to_string().bold());
+            println!();
+
+            // Create color scheme and display first 30 tokens
+            let colors = ColorScheme::default();
+            println!("First 30 tokens ({} {} tokens):",
+                colors.style_text("text"),
+                colors.style_delimiter("delimiters")
+            );
+            println!();
+
+            for (i, token) in preprocessed.iter().take(30).enumerate() {
+                if i > 0 {
+                    print!(" ");  // Space between tokens
+                }
+                print!("{}", token.display_inline(&colors));
+            }
+            if preprocessed.len() > 30 {
+                print!("{}", format!(" ... ({} more tokens)", preprocessed.len() - 30).bright_black());
+            }
+            println!();
 
             println!("\n=== Demo Complete ===");
             println!(
-                "The file 'the-verdict.txt' is now ready for further text processing examples."
+                "The file '{}' has been tokenized and is ready for further processing.",
+                VERDICT_FILENAME
             );
         }
         Commands::Analyze {
