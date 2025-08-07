@@ -1,5 +1,5 @@
 [workspace]
-members = [
+members = [ "bpe",
     "ch02",
 ]
 resolver = "2"
