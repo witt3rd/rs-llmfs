@@ -119,7 +119,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>
 - Provides async versions of file/network operations
 - Full featured runtime with work-stealing scheduler
 
-### 4. **Error Handling with `?` Operator**
+### 4. **Error Handling: `?` Operator vs `unwrap()`**
+
+#### The `?` Operator (Preferred)
 
 ```rust
 let response = http_get(url).await?;
@@ -129,6 +131,53 @@ let response = http_get(url).await?;
 - Automatically converts error types with `Into` trait
 - Cleaner than explicit `match` statements
 - Requires function to return `Result`
+
+#### The `unwrap()` Method (Use Carefully)
+
+```rust
+// When it's OK to use unwrap():
+let re = Regex::new(r#"([,.:;?_!"()']|--|\s)"#).unwrap();  // Static pattern, will never fail
+let encoding = r50k_base().unwrap();  // In demo code where failure = bug
+
+// When to AVOID unwrap():
+let file = fs::File::open(path).unwrap();  // ❌ User input could be invalid
+let num = user_input.parse::<i32>().unwrap();  // ❌ Parsing can fail
+```
+
+**When `unwrap()` is acceptable:**
+
+- Static patterns that are known to be valid (regex with hardcoded patterns)
+- Demo/example code where panic is acceptable
+- Tests where failure indicates a bug
+- After explicit validation that guarantees success
+
+**When to avoid `unwrap()`:**
+
+- Processing user input
+- Network operations
+- File I/O operations
+- Any operation that can legitimately fail
+
+**Alternatives to `unwrap()`:**
+
+```rust
+// Use expect() for better error messages
+let re = Regex::new(pattern).expect("Invalid regex pattern");
+
+// Use unwrap_or_default() for fallback values
+let count = map.get("key").unwrap_or(&0);
+
+// Use match for custom error handling
+match result {
+    Ok(value) => process(value),
+    Err(e) => eprintln!("Error: {}", e),
+}
+
+// Use if let for optional handling
+if let Ok(value) = result {
+    process(value);
+}
+```
 
 ### 5. **Trait Objects: `Box<dyn Error>`**
 
@@ -222,6 +271,7 @@ println!("{}", " ".on_bright_white().black());  // Visualize whitespace
 ```
 
 Key concepts:
+
 - **Method chaining**: `"text".blue().bold().underline()`
 - **Foreground/background**: `.red()` vs `.on_red()`
 - **Brightness variants**: `.bright_black()` for subtle text
@@ -261,6 +311,7 @@ for token in &tokens {
 ```
 
 This creates a visual "syntax highlighting" effect where:
+
 - Text tokens appear with colored backgrounds
 - Whitespace is visually distinct
 - Special characters (newlines, tabs) show symbols
@@ -295,7 +346,7 @@ impl ColorScheme {
             delimiter_fg: Color::Black,
         }
     }
-    
+
     fn style_text(&self, text: &str) -> ColoredString {
         text.color(self.text_fg).on_color(self.text_bg)
     }
@@ -303,6 +354,7 @@ impl ColorScheme {
 ```
 
 Benefits of centralized configuration:
+
 - **Single source of truth**: Change colors in one place
 - **Extensibility**: Easy to add themes or load from config files
 - **Testability**: Can inject different configurations
@@ -310,6 +362,7 @@ Benefits of centralized configuration:
 - **Future-proof**: Can add CLI args like `--color-scheme dark`
 
 This pattern applies to any repeated values:
+
 - Color schemes
 - API endpoints
 - Default sizes/limits
@@ -602,12 +655,14 @@ let vocab: HashMap<String, usize> = build_vocabulary(&text);
 ```
 
 Benefits:
+
 - **No training required**: Use OpenAI's pre-trained models
 - **Consistent tokenization**: Same as GPT-2/GPT-3
 - **Efficient**: BPE handles subword tokenization well
 - **Special token support**: Built-in handling of <|endoftext|>, etc.
 
 Trade-offs:
+
 - **Binary size**: Embedded vocabulary adds ~1MB
 - **Fixed vocabulary**: Can't customize for domain-specific text
 - **API differences**: Rust API differs from Python tiktoken
@@ -641,16 +696,16 @@ When building pedagogical tools, structure subcommands to support both learning 
 enum Commands {
     /// Complete demo showing all concepts step-by-step
     Demo,
-    
+
     /// Individual tool for specific functionality
     Tokenize {
         #[arg(short = 'z', long, value_enum)]
         tokenizer: TokenizerChoice,
-        
+
         #[arg(short, long)]
         detailed: bool,  // Show educational details
     },
-    
+
     /// Lower-level utilities for exploration
     Split { method: SplitMethod },
     Analyze { file_path: String },
@@ -665,6 +720,7 @@ Design principles:
    - `split/analyze`: Building blocks for understanding
 
 2. **Educational Flags**:
+
    ```rust
    if detailed {
        // Show token-by-token breakdown
@@ -675,6 +731,7 @@ Design principles:
    ```
 
 3. **Python Equivalents**:
+
    ```rust
    println!("Python equivalent:");
    println!("```python");
@@ -685,6 +742,7 @@ Design principles:
    ```
 
 This pattern helps learners:
+
 - See the big picture with `demo`
 - Experiment with specific features
 - Understand both Rust and Python approaches
@@ -735,10 +793,12 @@ When to use this pattern:
 ```
 
 Real-world impact:
+
 - Cloning a Vec with 10,000 tokens: ~80KB allocation + copy time
 - Cloning an Arc with 10,000 tokens: 8 bytes + atomic increment
 
 This pattern is especially valuable in LLM contexts where:
+
 - Token sequences are large (entire documents)
 - Multiple analyses run on the same tokens
 - Parallel processing shares data across threads

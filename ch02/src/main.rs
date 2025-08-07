@@ -166,22 +166,22 @@ impl SimpleTokenizerV1 {
             .iter()
             .map(|(s, &i)| (i, s.clone()))
             .collect();
-        
+
         SimpleTokenizerV1 {
             str_to_int: vocab,
             int_to_str,
         }
     }
-    
+
     /// Encode text into a sequence of token IDs
     fn encode(&self, text: &str) -> Result<Vec<usize>, String> {
         // Split text using comprehensive punctuation pattern
         let re = Regex::new(r#"([,.:;?_!"()']|--|\s)"#).unwrap();
-        
+
         // Split and filter empty strings
         let mut preprocessed = Vec::new();
         let mut last_end = 0;
-        
+
         for mat in re.find_iter(text) {
             // Add text before match
             if mat.start() > last_end {
@@ -197,7 +197,7 @@ impl SimpleTokenizerV1 {
             }
             last_end = mat.end();
         }
-        
+
         // Add remaining text
         if last_end < text.len() {
             let content = text[last_end..].trim();
@@ -205,7 +205,7 @@ impl SimpleTokenizerV1 {
                 preprocessed.push(content);
             }
         }
-        
+
         // Convert to IDs
         let mut ids = Vec::new();
         for token in preprocessed {
@@ -214,10 +214,10 @@ impl SimpleTokenizerV1 {
                 None => return Err(format!("Token '{}' not in vocabulary", token)),
             }
         }
-        
+
         Ok(ids)
     }
-    
+
     /// Decode a sequence of token IDs back into text
     fn decode(&self, ids: &[usize]) -> Result<String, String> {
         // Convert IDs to strings
@@ -228,14 +228,14 @@ impl SimpleTokenizerV1 {
                 None => return Err(format!("ID {} not in vocabulary", id)),
             }
         }
-        
+
         // Join with spaces
         let mut text = tokens.join(" ");
-        
+
         // Fix spacing around punctuation
         let re = Regex::new(r#"\s+([,.?!"()'])"#).unwrap();
         text = re.replace_all(&text, "$1").to_string();
-        
+
         Ok(text)
     }
 }
@@ -248,22 +248,22 @@ impl SimpleTokenizerV2 {
             .iter()
             .map(|(s, &i)| (i, s.clone()))
             .collect();
-        
+
         SimpleTokenizerV2 {
             str_to_int: vocab,
             int_to_str,
         }
     }
-    
+
     /// Encode text into a sequence of token IDs, using <|unk|> for unknown tokens
     fn encode(&self, text: &str) -> Vec<usize> {
         // Split text using comprehensive punctuation pattern
         let re = Regex::new(r#"([,.:;?_!"()']|--|\s)"#).unwrap();
-        
+
         // Split and filter empty strings
         let mut preprocessed = Vec::new();
         let mut last_end = 0;
-        
+
         for mat in re.find_iter(text) {
             // Add text before match
             if mat.start() > last_end {
@@ -279,7 +279,7 @@ impl SimpleTokenizerV2 {
             }
             last_end = mat.end();
         }
-        
+
         // Add remaining text
         if last_end < text.len() {
             let content = text[last_end..].trim();
@@ -287,7 +287,7 @@ impl SimpleTokenizerV2 {
                 preprocessed.push(content);
             }
         }
-        
+
         // Replace unknown tokens with <|unk|> and convert to IDs
         let mut ids = Vec::new();
         for token in preprocessed {
@@ -296,16 +296,16 @@ impl SimpleTokenizerV2 {
             } else {
                 "<|unk|>"
             };
-            
+
             // This should always succeed since we ensure <|unk|> is in vocabulary
             if let Some(&id) = self.str_to_int.get(token_or_unk) {
                 ids.push(id);
             }
         }
-        
+
         ids
     }
-    
+
     /// Decode a sequence of token IDs back into text
     fn decode(&self, ids: &[usize]) -> Result<String, String> {
         // Convert IDs to strings
@@ -316,14 +316,14 @@ impl SimpleTokenizerV2 {
                 None => return Err(format!("ID {} not in vocabulary", id)),
             }
         }
-        
+
         // Join with spaces
         let mut text = tokens.join(" ");
-        
+
         // Fix spacing around punctuation
         let re = Regex::new(r#"\s+([,.?!"()'])"#).unwrap();
         text = re.replace_all(&text, "$1").to_string();
-        
+
         Ok(text)
     }
 }
@@ -375,15 +375,15 @@ enum Commands {
         /// Text to tokenize (or use default examples if not provided)
         #[arg(short, long)]
         text: Option<String>,
-        
+
         /// Path to file to tokenize (overrides text if provided)
         #[arg(short, long)]
         file_path: Option<String>,
-        
+
         /// Which tokenizer to use
         #[arg(short = 'z', long, value_enum, default_value = "tiktoken")]
         tokenizer: TokenizerChoice,
-        
+
         /// Show detailed token analysis
         #[arg(short, long)]
         detailed: bool,
@@ -820,20 +820,20 @@ async fn handle_tokenize(
             // Demonstrate tiktoken (GPT-2 tokenizer)
             println!("Loading GPT-2 tokenizer (r50k_base)...");
             let encoding = r50k_base().map_err(|e| format!("Failed to load tokenizer: {}", e))?;
-            
+
             // Note: tiktoken-rs doesn't expose vocabulary size directly
             println!();
-            
+
             // Get special tokens
             let allowed_special = encoding.special_tokens();
-            
+
             // Encode text
             println!("Encoding text (allowing special tokens)...");
             let (tokens, _) = encoding.encode(&input_text, &allowed_special);
-            
+
             println!("Token IDs: {:?}", tokens);
             println!("Number of tokens: {}", tokens.len());
-            
+
             if detailed {
                 println!();
                 println!("Token details:");
@@ -846,23 +846,23 @@ async fn handle_tokenize(
                     }
                 }
             }
-            
+
             // Decode back to text
             println!();
             println!("Decoding tokens back to text...");
             let decoded = encoding
                 .decode(tokens.clone())
                 .map_err(|e| format!("Decoding failed: {}", e))?;
-            
+
             println!("Decoded text: {}", decoded);
-            
+
             // Verify round-trip
             if decoded == input_text {
                 println!("{}", "✓ Round-trip encoding/decoding successful!".green());
             } else {
                 println!("{}", "⚠ Decoded text differs from original (expected for tiktoken with special handling)".yellow());
             }
-            
+
             // Show Python equivalent
             println!();
             println!("Python equivalent:");
@@ -887,10 +887,10 @@ async fn handle_tokenize(
         }
         TokenizerChoice::V1 | TokenizerChoice::V2 => {
             // For V1 and V2, we need to build a vocabulary first
-            println!("Note: SimpleTokenizer{} requires a vocabulary built from training data.", 
+            println!("Note: SimpleTokenizer{} requires a vocabulary built from training data.",
                 if matches!(tokenizer, TokenizerChoice::V1) { "V1" } else { "V2" });
             println!("Loading sample text to build vocabulary...");
-            
+
             // Use the verdict text to build vocabulary
             let sample_text = if Path::new(VERDICT_FILENAME).exists() {
                 fs::read_to_string(VERDICT_FILENAME).await?
@@ -898,46 +898,46 @@ async fn handle_tokenize(
                 println!("Sample text file not found. Run 'cargo run -p ch02 -- demo' first to download it.");
                 return Err("Sample text file not found".into());
             };
-            
+
             // Build vocabulary from sample text
             let tokens = all_split(&sample_text);
             let unique_words: HashSet<&str> = tokens
                 .iter()
                 .map(|token| token.content.as_str())
                 .collect();
-            
+
             let mut sorted_words: Vec<&str> = unique_words.into_iter().collect();
             sorted_words.sort();
-            
+
             // Add special tokens for V2
             if matches!(tokenizer, TokenizerChoice::V2) {
                 sorted_words.push("<|endoftext|>");
                 sorted_words.push("<|unk|>");
             }
-            
+
             let vocab: HashMap<String, usize> = sorted_words
                 .iter()
                 .enumerate()
                 .map(|(idx, &word)| (word.to_string(), idx))
                 .collect();
-            
+
             println!("Built vocabulary with {} entries", vocab.len());
             println!();
-            
+
             match tokenizer {
                 TokenizerChoice::V1 => {
                     let tokenizer = SimpleTokenizerV1::new(vocab);
-                    
+
                     match tokenizer.encode(&input_text) {
                         Ok(ids) => {
                             println!("Token IDs: {:?}", ids);
                             println!("Number of tokens: {}", ids.len());
-                            
+
                             match tokenizer.decode(&ids) {
                                 Ok(decoded) => {
                                     println!();
                                     println!("Decoded text: {}", decoded);
-                                    
+
                                     if decoded == input_text {
                                         println!("{}", "✓ Round-trip encoding/decoding successful!".green());
                                     } else {
@@ -952,16 +952,16 @@ async fn handle_tokenize(
                 }
                 TokenizerChoice::V2 => {
                     let tokenizer = SimpleTokenizerV2::new(vocab);
-                    
+
                     let ids = tokenizer.encode(&input_text);
                     println!("Token IDs: {:?}", ids);
                     println!("Number of tokens: {}", ids.len());
-                    
+
                     match tokenizer.decode(&ids) {
                         Ok(decoded) => {
                             println!();
                             println!("Decoded text: {}", decoded);
-                            
+
                             if decoded == input_text {
                                 println!("{}", "✓ Round-trip encoding/decoding successful!".green());
                             } else {
@@ -975,7 +975,7 @@ async fn handle_tokenize(
             }
         }
     }
-    
+
     Ok(())
 }
 
@@ -1108,32 +1108,32 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .iter()
                 .map(|token| token.content.as_str())
                 .collect();
-            
+
             let vocab_size = unique_words.len();
-            
+
             // Convert to sorted vector for display
             let mut sorted_words: Vec<&str> = unique_words.into_iter().collect();
             sorted_words.sort();
             println!("Vocabulary size: {}", vocab_size.to_string().bold());
             println!();
-            
+
             // Show first 50 words from vocabulary
             println!("First 50 words from vocabulary (alphabetically sorted):");
             println!();
-            
+
             for (i, word) in sorted_words.iter().take(50).enumerate() {
                 if i > 0 && i % 10 == 0 {
                     println!();  // New line every 10 words
                 }
                 print!("{:<12}", word);  // Left-aligned with 12 character width
             }
-            
+
             if sorted_words.len() > 50 {
                 println!();
                 println!("{}", format!("... ({} more words)", sorted_words.len() - 50).bright_black());
             }
             println!();
-            
+
             // Step 6: Create tokenizer and demonstrate encode/decode
             println!();
             println!("Step 6: Create SimpleTokenizerV1 and demonstrate encode/decode");
@@ -1145,40 +1145,40 @@ async fn main() -> Result<(), Box<dyn Error>> {
             println!("  ids = tokenizer.encode(text)");
             println!("  decoded_text = tokenizer.decode(ids)");
             println!();
-            
+
             // Create vocabulary mapping from sorted unique words
             let vocab: HashMap<String, usize> = sorted_words
                 .iter()
                 .enumerate()
                 .map(|(idx, &word)| (word.to_string(), idx))
                 .collect();
-            
+
             let vocab_size = vocab.len();
             println!("Created vocabulary with {} entries", vocab_size);
-            
+
             // Create tokenizer
             let tokenizer = SimpleTokenizerV1::new(vocab);
-            
+
             // Example text from the book
             let example_text = "\"It's the last he painted, you know,\" \n       Mrs. Gisburn said with pardonable pride.";
             println!();
             println!("Example text:");
             println!("{}", example_text);
-            
+
             // Encode the text
             match tokenizer.encode(example_text) {
                 Ok(ids) => {
                     println!();
                     println!("Encoded IDs: {:?}", ids);
                     println!("Number of tokens: {}", ids.len());
-                    
+
                     // Decode back to text
                     match tokenizer.decode(&ids) {
                         Ok(decoded) => {
                             println!();
                             println!("Decoded text:");
                             println!("{}", decoded);
-                            
+
                             // Verify round-trip
                             if decoded == example_text {
                                 println!("{}", "✓ Round-trip encoding/decoding successful!".green());
@@ -1193,7 +1193,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
                 Err(e) => println!("{}", format!("Error encoding: {}", e).red()),
             }
-            
+
             // Step 7: Extend vocabulary with special tokens
             println!();
             println!("Step 7: Extend vocabulary with special tokens");
@@ -1203,21 +1203,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
             println!("  vocab = {{token:integer for integer,token in enumerate(all_tokens)}}");
             println!("  print(len(vocab.items()))");
             println!();
-            
+
             // Create a new vocabulary with special tokens
             let mut all_tokens = sorted_words.clone();
             all_tokens.push("<|endoftext|>");
             all_tokens.push("<|unk|>");
-            
+
             let vocab_with_special: HashMap<String, usize> = all_tokens
                 .iter()
                 .enumerate()
                 .map(|(idx, &word)| (word.to_string(), idx))
                 .collect();
-            
+
             println!("Original vocabulary size: {}", vocab_size);
             println!("Extended vocabulary size: {}", vocab_with_special.len());
-            
+
             // Show the last five entries of the vocabulary
             println!();
             println!("Last five entries of the updated vocabulary:");
@@ -1225,15 +1225,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
             println!("  for i, item in enumerate(list(vocab.items())[-5:]):");
             println!("      print(item)");
             println!();
-            
+
             // Get sorted vocabulary items to show last 5
             let mut vocab_items: Vec<(&String, &usize)> = vocab_with_special.iter().collect();
             vocab_items.sort_by_key(|&(_, &id)| id);
-            
+
             for &(token, id) in vocab_items.iter().rev().take(5).rev() {
                 println!("('{}', {})", token, id);
             }
-            
+
             // Step 8: Create SimpleTokenizerV2 and test with unknown tokens
             println!();
             println!("Step 8: Create SimpleTokenizerV2 to handle unknown tokens");
@@ -1242,29 +1242,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
             println!("  text = \"Hello, do you like tea?\"");
             println!("  print(tokenizer.encode(text))");
             println!();
-            
+
             // Create tokenizer V2 with extended vocabulary
             let tokenizer_v2 = SimpleTokenizerV2::new(vocab_with_special);
-            
+
             let new_text = "Hello, do you like tea?";
             println!("New text: \"{}\"", new_text);
-            
+
             let ids = tokenizer_v2.encode(new_text);
             println!("Encoded IDs: {:?}", ids);
             println!("Number of tokens: {}", ids.len());
-            
+
             // Decode to show the result
             match tokenizer_v2.decode(&ids) {
                 Ok(decoded) => {
                     println!("Decoded text: \"{}\"", decoded);
-                    
+
                     // Show which tokens were replaced with <|unk|>
                     println!();
                     println!("Token mapping:");
                     let re = Regex::new(r#"([,.:;?_!"()']|--|\s)"#).unwrap();
                     let mut tokens = Vec::new();
                     let mut last_end = 0;
-                    
+
                     for mat in re.find_iter(new_text) {
                         if mat.start() > last_end {
                             let content = new_text[last_end..mat.start()].trim();
@@ -1284,7 +1284,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             tokens.push(content);
                         }
                     }
-                    
+
                     for (token, &id) in tokens.iter().zip(ids.iter()) {
                         let mapped = if tokenizer_v2.str_to_int.contains_key(*token) {
                             token
@@ -1296,7 +1296,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
                 Err(e) => println!("Error decoding: {}", e),
             }
-            
+
             // Step 9: Demonstrate joining multiple texts with <|endoftext|>
             println!();
             println!("Step 9: Join multiple texts with <|endoftext|> token");
@@ -1307,20 +1307,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
             println!("  print(text)");
             println!("  print(tokenizer.encode(text))");
             println!();
-            
+
             let text1 = "Hello, do you like tea?";
             let text2 = "In the sunlit terraces of the palace.";
             let joined_text = format!("{} <|endoftext|> {}", text1, text2);
-            
+
             println!("Text 1: \"{}\"", text1);
             println!("Text 2: \"{}\"", text2);
             println!("Joined text: \"{}\"", joined_text);
             println!();
-            
+
             let ids = tokenizer_v2.encode(&joined_text);
             println!("Encoded IDs: {:?}", ids);
             println!("Number of tokens: {}", ids.len());
-            
+
             // Decode to verify
             match tokenizer_v2.decode(&ids) {
                 Ok(decoded) => {
@@ -1328,7 +1328,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
                 Err(e) => println!("Error decoding: {}", e),
             }
-            
+
             // Step 10: Demonstrate tiktoken (GPT-2 tokenizer)
             println!();
             println!("Step 10: Demonstrate tiktoken (GPT-2 tokenizer)");
@@ -1341,30 +1341,30 @@ async fn main() -> Result<(), Box<dyn Error>> {
             println!("  decoded = encoding.decode(tokens)");
             println!("  print(decoded)");
             println!();
-            
+
             println!("Loading GPT-2 tokenizer (r50k_base)...");
             let encoding = r50k_base().unwrap();
-            
+
             let tiktoken_text = "Hello, do you like tea? <|endoftext|> In the sunlit terraces of someunknownPlace.";
             println!();
             println!("Input text: \"{}\"", tiktoken_text);
-            
+
             // Get special tokens
             let allowed_special = encoding.special_tokens();
-            
+
             // Encode text
             let (tokens, _) = encoding.encode(tiktoken_text, &allowed_special);
             println!("Token IDs: {:?}", tokens);
             println!("Number of tokens: {}", tokens.len());
-            
+
             // Decode back to text
             let decoded = encoding.decode(tokens.clone()).unwrap();
             println!("Decoded text: \"{}\"", decoded);
-            
+
             if decoded == tiktoken_text {
                 println!("{}", "✓ Round-trip encoding/decoding successful!".green());
             }
-            
+
             // Compare tokenization between our simple tokenizer and tiktoken
             println!();
             println!("Comparison of tokenization approaches:");

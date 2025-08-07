@@ -68,6 +68,7 @@ ids = [vocab[word] for word in tokens]
 ```
 
 Limitations:
+
 - Large vocabulary size (one entry per unique word)
 - Cannot handle out-of-vocabulary (OOV) words
 - Inefficient for morphologically rich languages
@@ -84,6 +85,7 @@ tokens = encoding.encode("Hello, world!")
 ```
 
 Advantages:
+
 - Smaller vocabulary (~50k tokens vs millions of words)
 - Handles any input text (no OOV problem)
 - Captures subword patterns ("running" → "run" + "ning")
@@ -175,6 +177,7 @@ cargo run -p ch02 -- split --method all --max-display 50
 ```
 
 Methods available:
+
 - `ws`: Whitespace only
 - `punct`: Whitespace + basic punctuation
 - `all`: Comprehensive punctuation (as in book)
@@ -195,6 +198,7 @@ cargo run -p ch02 -- tokenize --tokenizer v2
 ```
 
 Options:
+
 - `--text "custom text"`: Provide custom text
 - `--file-path path/to/file`: Tokenize a file
 - `--detailed`: Show token-by-token breakdown
