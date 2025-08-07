@@ -499,18 +499,32 @@ impl Theme {
 1. Add more text statistics to the `analyze` command (average word length, sentence count)
 2. Add a `--quiet` flag to suppress progress bars
 3. Implement a `list` subcommand that shows downloaded files
+4. Add a `--compare` flag to `tokenize` that shows all three tokenizers side-by-side
 
 ### Intermediate
 
 1. Add support for analyzing multiple files at once
 2. Implement text encoding detection (not just UTF-8)
 3. Create a `batch` subcommand that downloads from a list of URLs
+4. Build a tokenizer efficiency analyzer that compares:
+   - Token count for the same text
+   - Encoding/decoding speed
+   - Memory usage
+5. Add support for other tiktoken encodings (cl100k_base for GPT-4, p50k_base, etc.)
 
 ### Advanced
 
 1. Add streaming analysis (analyze while downloading)
 2. Implement parallel downloads with a configurable thread pool
 3. Create a plugin system for custom text analyzers
+4. Implement a trait-based tokenizer abstraction that allows:
+   - Runtime tokenizer selection
+   - Custom tokenizer implementations
+   - Tokenizer chaining/composition
+5. Build a vocabulary analyzer that shows:
+   - Most common tokens
+   - Token frequency distribution
+   - Coverage statistics (% of text covered by top N tokens)
 
 ## Key Rust Features Demonstrated
 
@@ -541,7 +555,142 @@ This chapter's patterns will be essential for:
 - **Training progress monitoring**
 - **Model checkpoint saving**
 
-### 13. **Smart Pointer Selection: Arc vs Vec**
+### 13. **Integrating External Tokenizers: tiktoken-rs**
+
+```rust
+use tiktoken_rs::r50k_base;
+
+// Load pre-trained GPT-2 tokenizer
+let encoding = r50k_base()?;
+
+// Handle special tokens correctly
+let allowed_special = encoding.special_tokens();
+
+// Encode returns tuple (tokens, total_tokens)
+let (tokens, _) = encoding.encode(text, &allowed_special);
+
+// Decode requires owned Vec, not borrowed slice
+let decoded = encoding.decode(tokens.clone())?;
+```
+
+Key lessons from tiktoken integration:
+
+#### API Adaptation Patterns
+
+When wrapping external libraries, you often need to adapt their APIs:
+
+```rust
+// ❌ tiktoken-rs doesn't have these (from Python API):
+encoding.base_vocabulary_size()  // Not exposed
+encoding.encode(text, allowed_special, disallowed)  // Different signature
+
+// ✅ Adapt to what's available:
+let (tokens, _count) = encoding.encode(text, &allowed_special);
+```
+
+#### Working with Pre-compiled Data
+
+tiktoken uses pre-compiled BPE (Byte Pair Encoding) models:
+
+```rust
+// r50k_base() loads a 50,257 token vocabulary
+// This is embedded in the binary at compile time
+let encoding = r50k_base()?;
+
+// Versus our simple tokenizer that builds vocabulary at runtime:
+let vocab: HashMap<String, usize> = build_vocabulary(&text);
+```
+
+Benefits:
+- **No training required**: Use OpenAI's pre-trained models
+- **Consistent tokenization**: Same as GPT-2/GPT-3
+- **Efficient**: BPE handles subword tokenization well
+- **Special token support**: Built-in handling of <|endoftext|>, etc.
+
+Trade-offs:
+- **Binary size**: Embedded vocabulary adds ~1MB
+- **Fixed vocabulary**: Can't customize for domain-specific text
+- **API differences**: Rust API differs from Python tiktoken
+
+#### Creating a Unified Interface
+
+When supporting multiple tokenizers, create a common trait:
+
+```rust
+// Abstract over different tokenizer implementations
+trait Tokenizer {
+    fn encode(&self, text: &str) -> Vec<usize>;
+    fn decode(&self, tokens: &[usize]) -> Result<String, String>;
+    fn vocab_size(&self) -> usize;
+}
+
+// Then implement for each tokenizer type
+impl Tokenizer for TiktokenWrapper { ... }
+impl Tokenizer for SimpleTokenizerV1 { ... }
+impl Tokenizer for SimpleTokenizerV2 { ... }
+```
+
+This allows switching tokenizers without changing calling code.
+
+### 14. **Subcommand Design for Educational Tools**
+
+When building pedagogical tools, structure subcommands to support both learning and practical use:
+
+```rust
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Complete demo showing all concepts step-by-step
+    Demo,
+    
+    /// Individual tool for specific functionality
+    Tokenize {
+        #[arg(short = 'z', long, value_enum)]
+        tokenizer: TokenizerChoice,
+        
+        #[arg(short, long)]
+        detailed: bool,  // Show educational details
+    },
+    
+    /// Lower-level utilities for exploration
+    Split { method: SplitMethod },
+    Analyze { file_path: String },
+}
+```
+
+Design principles:
+
+1. **Progressive Disclosure**:
+   - `demo`: Guided walkthrough with explanations
+   - `tokenize`: Focused tool with options
+   - `split/analyze`: Building blocks for understanding
+
+2. **Educational Flags**:
+   ```rust
+   if detailed {
+       // Show token-by-token breakdown
+       for (i, &token_id) in tokens.iter().enumerate() {
+           println!("[{}] {} -> \"{}\"", i, token_id, decoded_token);
+       }
+   }
+   ```
+
+3. **Python Equivalents**:
+   ```rust
+   println!("Python equivalent:");
+   println!("```python");
+   println!("import tiktoken");
+   println!("encoding = tiktoken.get_encoding(\"r50k_base\")");
+   println!("tokens = encoding.encode(text, allowed_special=\"all\")");
+   println!("```");
+   ```
+
+This pattern helps learners:
+- See the big picture with `demo`
+- Experiment with specific features
+- Understand both Rust and Python approaches
+- Build mental models progressively
+
+### 15. **Smart Pointer Selection: Arc vs Vec**
 
 When returning collections of data that won't be modified, consider using `Arc<[T]>` instead of `Vec<T>`:
 
@@ -603,5 +752,17 @@ This chapter introduced fundamental Rust patterns through a practical tool. We l
 - Error handling best practices
 - Memory-efficient streaming
 - Smart pointer selection for performance
+- **Integrating external libraries** (tiktoken-rs)
+- **API adaptation patterns** when Rust APIs differ from Python
+- **Pedagogical tool design** with progressive disclosure
+- **Tokenizer comparison** showing trade-offs between approaches
 
-These concepts form the foundation for building larger systems in Rust, whether for machine learning or any other domain.
+### Key Rust Patterns from Tokenizer Implementation
+
+1. **API Adaptation**: When Rust crate APIs differ from Python equivalents, create wrapper functions
+2. **Owned vs Borrowed**: tiktoken's `decode()` requires `Vec<u32>` (owned), not `&[u32]` (borrowed) - use `clone()` when needed
+3. **Tuple Returns**: Rust functions often return tuples like `(tokens, count)` - destructure with `let (tokens, _) = ...`
+4. **HashSet Operations**: Use `.iter()` not `.keys()` on HashSet, unlike HashMap which has `.keys()`
+5. **Error Mapping**: Convert library-specific errors to Box<dyn Error> with `.map_err(|e| format!("..."))?`
+
+These patterns demonstrate real-world Rust development: adapting external crates, managing ownership, and creating clean APIs while maintaining type safety and performance.

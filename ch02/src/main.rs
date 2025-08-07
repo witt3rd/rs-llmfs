@@ -27,6 +27,7 @@ use futures_util::StreamExt; // Trait needed for .next() on streams
 use indicatif::{ProgressBar, ProgressStyle}; // Types imported directly
 use regex::Regex; // Type imported directly
 use reqwest; // Module import - we'll use reqwest::get() (function convention)
+use tiktoken_rs::r50k_base; // GPT-2 tokenizer
 use tokio::fs; // Module import - we'll use fs::read_to_string() (function convention)
 use tokio::io::AsyncWriteExt; // Trait needed for .write_all() method
 
@@ -80,12 +81,36 @@ enum SplitMethod {
     All,
 }
 
+/// Choice of tokenizer for the Tokenize subcommand
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum TokenizerChoice {
+    /// Our custom SimpleTokenizerV1 (requires vocabulary)
+    #[value(name = "v1")]
+    V1,
+    /// Our custom SimpleTokenizerV2 with <|unk|> handling
+    #[value(name = "v2")]
+    V2,
+    /// OpenAI's tiktoken (GPT-2 tokenizer)
+    #[value(name = "tiktoken")]
+    Tiktoken,
+}
+
 impl fmt::Display for SplitMethod {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SplitMethod::Whitespace => write!(f, "whitespace"),
             SplitMethod::Punctuation => write!(f, "punctuation"),
             SplitMethod::All => write!(f, "all"),
+        }
+    }
+}
+
+impl fmt::Display for TokenizerChoice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TokenizerChoice::V1 => write!(f, "SimpleTokenizerV1"),
+            TokenizerChoice::V2 => write!(f, "SimpleTokenizerV2"),
+            TokenizerChoice::Tiktoken => write!(f, "tiktoken (GPT-2)"),
         }
     }
 }
@@ -344,6 +369,24 @@ enum Commands {
         /// Maximum number of tokens to display
         #[arg(long, default_value = "30")]
         max_display: usize,
+    },
+    /// Demonstrate various tokenizers (SimpleTokenizerV1, V2, and tiktoken)
+    Tokenize {
+        /// Text to tokenize (or use default examples if not provided)
+        #[arg(short, long)]
+        text: Option<String>,
+        
+        /// Path to file to tokenize (overrides text if provided)
+        #[arg(short, long)]
+        file_path: Option<String>,
+        
+        /// Which tokenizer to use
+        #[arg(short = 'z', long, value_enum, default_value = "tiktoken")]
+        tokenizer: TokenizerChoice,
+        
+        /// Show detailed token analysis
+        #[arg(short, long)]
+        detailed: bool,
     },
 }
 
@@ -740,6 +783,202 @@ async fn handle_split(
     Ok(())
 }
 
+/// Handles the tokenize subcommand, demonstrating various tokenizer implementations.
+///
+/// # Arguments
+///
+/// * `text` - Optional text to tokenize
+/// * `file_path` - Optional file path (overrides text)
+/// * `tokenizer` - Which tokenizer to use
+/// * `detailed` - Whether to show detailed analysis
+async fn handle_tokenize(
+    text: Option<String>,
+    file_path: Option<String>,
+    tokenizer: TokenizerChoice,
+    detailed: bool,
+) -> Result<(), Box<dyn Error>> {
+    // Get the text to tokenize
+    let input_text = if let Some(path) = file_path {
+        println!("Reading text from: {}", path);
+        fs::read_to_string(path).await?
+    } else if let Some(t) = text {
+        t
+    } else {
+        // Default example text that works with all tokenizers
+        "Hello, do you like tea? <|endoftext|> In the sunlit terraces of someunknownPlace.".to_string()
+    };
+
+    println!();
+    println!("=== {} Tokenization Demo ===", tokenizer);
+    println!();
+    println!("Input text ({} characters):", input_text.len());
+    println!("{}", input_text);
+    println!();
+
+    match tokenizer {
+        TokenizerChoice::Tiktoken => {
+            // Demonstrate tiktoken (GPT-2 tokenizer)
+            println!("Loading GPT-2 tokenizer (r50k_base)...");
+            let encoding = r50k_base().map_err(|e| format!("Failed to load tokenizer: {}", e))?;
+            
+            // Note: tiktoken-rs doesn't expose vocabulary size directly
+            println!();
+            
+            // Get special tokens
+            let allowed_special = encoding.special_tokens();
+            
+            // Encode text
+            println!("Encoding text (allowing special tokens)...");
+            let (tokens, _) = encoding.encode(&input_text, &allowed_special);
+            
+            println!("Token IDs: {:?}", tokens);
+            println!("Number of tokens: {}", tokens.len());
+            
+            if detailed {
+                println!();
+                println!("Token details:");
+                for (i, &token_id) in tokens.iter().enumerate() {
+                    // Decode individual token
+                    if let Ok(token_str) = encoding.decode(vec![token_id]) {
+                        println!("  [{}] {} -> \"{}\"", i, token_id, token_str);
+                    } else {
+                        println!("  [{}] {} -> <special token>", i, token_id);
+                    }
+                }
+            }
+            
+            // Decode back to text
+            println!();
+            println!("Decoding tokens back to text...");
+            let decoded = encoding
+                .decode(tokens.clone())
+                .map_err(|e| format!("Decoding failed: {}", e))?;
+            
+            println!("Decoded text: {}", decoded);
+            
+            // Verify round-trip
+            if decoded == input_text {
+                println!("{}", "✓ Round-trip encoding/decoding successful!".green());
+            } else {
+                println!("{}", "⚠ Decoded text differs from original (expected for tiktoken with special handling)".yellow());
+            }
+            
+            // Show Python equivalent
+            println!();
+            println!("Python equivalent:");
+            println!("```python");
+            println!("import tiktoken");
+            println!();
+            println!("# Load the GPT-2 tokenizer");
+            println!("encoding = tiktoken.get_encoding(\"r50k_base\")");
+            println!();
+            println!("# Input text");
+            println!("text = \"{}\"", input_text);
+            println!();
+            println!("# Encode with special tokens allowed");
+            println!("tokens = encoding.encode(text, allowed_special=\"all\")");
+            println!("print(f\"Tokens: {{tokens}}\")");
+            println!("print(f\"Number of tokens: {{len(tokens)}}\")");
+            println!();
+            println!("# Decode back to text");
+            println!("decoded = encoding.decode(tokens)");
+            println!("print(f\"Decoded: {{decoded}}\")");
+            println!("```");
+        }
+        TokenizerChoice::V1 | TokenizerChoice::V2 => {
+            // For V1 and V2, we need to build a vocabulary first
+            println!("Note: SimpleTokenizer{} requires a vocabulary built from training data.", 
+                if matches!(tokenizer, TokenizerChoice::V1) { "V1" } else { "V2" });
+            println!("Loading sample text to build vocabulary...");
+            
+            // Use the verdict text to build vocabulary
+            let sample_text = if Path::new(VERDICT_FILENAME).exists() {
+                fs::read_to_string(VERDICT_FILENAME).await?
+            } else {
+                println!("Sample text file not found. Run 'cargo run -p ch02 -- demo' first to download it.");
+                return Err("Sample text file not found".into());
+            };
+            
+            // Build vocabulary from sample text
+            let tokens = all_split(&sample_text);
+            let unique_words: HashSet<&str> = tokens
+                .iter()
+                .map(|token| token.content.as_str())
+                .collect();
+            
+            let mut sorted_words: Vec<&str> = unique_words.into_iter().collect();
+            sorted_words.sort();
+            
+            // Add special tokens for V2
+            if matches!(tokenizer, TokenizerChoice::V2) {
+                sorted_words.push("<|endoftext|>");
+                sorted_words.push("<|unk|>");
+            }
+            
+            let vocab: HashMap<String, usize> = sorted_words
+                .iter()
+                .enumerate()
+                .map(|(idx, &word)| (word.to_string(), idx))
+                .collect();
+            
+            println!("Built vocabulary with {} entries", vocab.len());
+            println!();
+            
+            match tokenizer {
+                TokenizerChoice::V1 => {
+                    let tokenizer = SimpleTokenizerV1::new(vocab);
+                    
+                    match tokenizer.encode(&input_text) {
+                        Ok(ids) => {
+                            println!("Token IDs: {:?}", ids);
+                            println!("Number of tokens: {}", ids.len());
+                            
+                            match tokenizer.decode(&ids) {
+                                Ok(decoded) => {
+                                    println!();
+                                    println!("Decoded text: {}", decoded);
+                                    
+                                    if decoded == input_text {
+                                        println!("{}", "✓ Round-trip encoding/decoding successful!".green());
+                                    } else {
+                                        println!("{}", "⚠ Decoded text differs from original".yellow());
+                                    }
+                                }
+                                Err(e) => println!("{}", format!("Error decoding: {}", e).red()),
+                            }
+                        }
+                        Err(e) => println!("{}", format!("Error encoding: {}", e).red()),
+                    }
+                }
+                TokenizerChoice::V2 => {
+                    let tokenizer = SimpleTokenizerV2::new(vocab);
+                    
+                    let ids = tokenizer.encode(&input_text);
+                    println!("Token IDs: {:?}", ids);
+                    println!("Number of tokens: {}", ids.len());
+                    
+                    match tokenizer.decode(&ids) {
+                        Ok(decoded) => {
+                            println!();
+                            println!("Decoded text: {}", decoded);
+                            
+                            if decoded == input_text {
+                                println!("{}", "✓ Round-trip encoding/decoding successful!".green());
+                            } else {
+                                println!("{}", "⚠ Decoded text may differ due to unknown token handling".yellow());
+                            }
+                        }
+                        Err(e) => println!("{}", format!("Error decoding: {}", e).red()),
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+    
+    Ok(())
+}
+
 /// The main entry point of our application.
 ///
 /// This function:
@@ -1089,6 +1328,51 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
                 Err(e) => println!("Error decoding: {}", e),
             }
+            
+            // Step 10: Demonstrate tiktoken (GPT-2 tokenizer)
+            println!();
+            println!("Step 10: Demonstrate tiktoken (GPT-2 tokenizer)");
+            println!("Python equivalent:");
+            println!("  import tiktoken");
+            println!("  encoding = tiktoken.get_encoding(\"r50k_base\")");
+            println!("  text = \"Hello, do you like tea? <|endoftext|> In the sunlit terraces of someunknownPlace.\"");
+            println!("  tokens = encoding.encode(text, allowed_special=\"all\")");
+            println!("  print(tokens)");
+            println!("  decoded = encoding.decode(tokens)");
+            println!("  print(decoded)");
+            println!();
+            
+            println!("Loading GPT-2 tokenizer (r50k_base)...");
+            let encoding = r50k_base().unwrap();
+            
+            let tiktoken_text = "Hello, do you like tea? <|endoftext|> In the sunlit terraces of someunknownPlace.";
+            println!();
+            println!("Input text: \"{}\"", tiktoken_text);
+            
+            // Get special tokens
+            let allowed_special = encoding.special_tokens();
+            
+            // Encode text
+            let (tokens, _) = encoding.encode(tiktoken_text, &allowed_special);
+            println!("Token IDs: {:?}", tokens);
+            println!("Number of tokens: {}", tokens.len());
+            
+            // Decode back to text
+            let decoded = encoding.decode(tokens.clone()).unwrap();
+            println!("Decoded text: \"{}\"", decoded);
+            
+            if decoded == tiktoken_text {
+                println!("{}", "✓ Round-trip encoding/decoding successful!".green());
+            }
+            
+            // Compare tokenization between our simple tokenizer and tiktoken
+            println!();
+            println!("Comparison of tokenization approaches:");
+            println!("- SimpleTokenizerV2: {} tokens", ids.len());
+            println!("- tiktoken (GPT-2): {} tokens", tokens.len());
+            println!();
+            println!("Note: tiktoken uses Byte Pair Encoding (BPE) which creates more");
+            println!("efficient tokenization by learning common subword patterns.");
 
             println!("\n=== Demo Complete ===");
             println!(
@@ -1108,6 +1392,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
             max_display,
         } => {
             handle_split(file_path, method, max_display).await?;
+        }
+        Commands::Tokenize {
+            text,
+            file_path,
+            tokenizer,
+            detailed,
+        } => {
+            handle_tokenize(text, file_path, tokenizer, detailed).await?;
         }
     }
 

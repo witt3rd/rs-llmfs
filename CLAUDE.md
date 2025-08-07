@@ -102,25 +102,46 @@ Key dependencies:
 
 ## Working with LESSONS Files
 
+**IMPORTANT**: These files have distinct purposes and should maintain clear separation of concerns:
+
+- **LESSONS-LLM.md**: Focuses EXCLUSIVELY on LLM/ML concepts, theory, and algorithms
+- **LESSONS-RS.md**: Focuses EXCLUSIVELY on Rust language features, patterns, and best practices
+
 ### LESSONS-LLM.md Structure
 
-Each LESSONS-LLM.md should contain:
+Each LESSONS-LLM.md should contain ML/LLM-specific content:
 
 1. **Chapter Overview** - What LLM concepts are covered
-2. **Key Concepts** - Core ideas with explanations
+2. **Key Concepts** - Core ML/LLM ideas with explanations (tokenization, attention, etc.)
 3. **Why This Matters** - How it connects to building complete LLMs
-4. **Prerequisites** - What readers should understand first
-5. **Looking Ahead** - How this prepares for future chapters
+4. **Prerequisites** - What ML/LLM concepts readers should understand first
+5. **Looking Ahead** - How this prepares for future LLM chapters
+6. **NO Rust-specific content** - Implementation details belong in LESSONS-RS.md
+
+Examples of appropriate content:
+- Tokenization theory (BPE, WordPiece, etc.)
+- Model architectures (transformers, attention mechanisms)
+- Training concepts (loss functions, optimization)
+- Data preparation for ML
 
 ### LESSONS-RS.md Structure
 
-Each LESSONS-RS.md should contain:
+Each LESSONS-RS.md should contain Rust-specific content:
 
 1. **Rust Concepts Introduced** - New language features used
 2. **Patterns and Idioms** - Best practices demonstrated
-3. **Common Pitfalls** - What to watch out for
-4. **Performance Notes** - Why certain approaches were chosen
-5. **Exercises** - Ways to extend or modify the code for learning
+3. **Common Pitfalls** - What to watch out for in Rust
+4. **Performance Notes** - Why certain Rust approaches were chosen
+5. **Exercises** - Ways to extend or modify the Rust code for learning
+6. **NO LLM theory** - ML concepts belong in LESSONS-LLM.md
+
+Examples of appropriate content:
+- Ownership and borrowing patterns
+- Async/await implementation
+- Error handling with Result/Option
+- Trait design and implementation
+- External crate integration
+- API adaptation from Python to Rust
 
 ## Development Notes
 
