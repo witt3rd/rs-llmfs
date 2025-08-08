@@ -410,6 +410,106 @@ enum Commands {
         #[arg(short = 'd', long)]
         show_decoded: bool,
     },
+    /// Create a GPT dataset with input-target pairs for training
+    Dataset {
+        /// Path to text file (defaults to the-verdict.txt if not provided)
+        #[arg(short, long)]
+        file_path: Option<String>,
+
+        /// Maximum sequence length for each sample
+        #[arg(short, long, default_value = "4")]
+        max_length: usize,
+
+        /// Stride for sliding window (how many tokens to move forward)
+        #[arg(short, long, default_value = "1")]
+        stride: usize,
+
+        /// Number of samples to display (0 for all)
+        #[arg(short = 'n', long, default_value = "5")]
+        num_samples: usize,
+
+        /// Show decoded text for samples
+        #[arg(short = 'd', long)]
+        show_decoded: bool,
+
+        /// Show dataset statistics
+        #[arg(short = 'v', long)]
+        verbose: bool,
+    },
+}
+
+/// GPT Dataset for creating input-target pairs for training
+///
+/// This dataset follows the pattern from the book where we create overlapping
+/// sequences of tokens for language model training. Each sample consists of:
+/// - Input: A sequence of tokens [t0, t1, ..., tn-1]
+/// - Target: The next tokens [t1, t2, ..., tn]
+///
+/// This is the Rust equivalent of PyTorch's Dataset class.
+/// In a real training scenario with Burn, these would be tensors.
+struct GPTDatasetV1 {
+    /// Input token sequences stored as vectors (u32 for tiktoken compatibility)
+    input_ids: Vec<Vec<u32>>,
+    /// Target token sequences stored as vectors (u32 for tiktoken compatibility)
+    target_ids: Vec<Vec<u32>>,
+}
+
+impl GPTDatasetV1 {
+    /// Create a new GPT dataset from text
+    ///
+    /// # Arguments
+    /// * `text` - The input text to tokenize
+    /// * `max_length` - Maximum sequence length for each sample
+    /// * `stride` - How many tokens to move forward between samples
+    ///
+    /// # Returns
+    /// A new GPTDatasetV1 instance with input-target pairs
+    fn new(text: &str, max_length: usize, stride: usize) -> Self {
+        // Use tiktoken (GPT-2 tokenizer) for encoding
+        let tokenizer = r50k_base().unwrap();
+        let token_ids = tokenizer.encode_with_special_tokens(text);
+        
+        let mut input_ids = Vec::new();
+        let mut target_ids = Vec::new();
+        
+        // Create overlapping sequences with the specified stride
+        let mut i = 0;
+        while i + max_length < token_ids.len() {
+            // Input chunk: tokens from i to i+max_length
+            let input_chunk = token_ids[i..i + max_length].to_vec();
+            // Target chunk: tokens from i+1 to i+max_length+1 (shifted by 1)
+            let target_chunk = token_ids[i + 1..i + max_length + 1].to_vec();
+            
+            input_ids.push(input_chunk);
+            target_ids.push(target_chunk);
+            
+            i += stride;
+        }
+        
+        GPTDatasetV1 {
+            input_ids,
+            target_ids,
+        }
+    }
+    
+    /// Get the number of samples in the dataset
+    fn len(&self) -> usize {
+        self.input_ids.len()
+    }
+    
+    /// Get a sample at the specified index
+    ///
+    /// # Arguments
+    /// * `idx` - The index of the sample to retrieve
+    ///
+    /// # Returns
+    /// A tuple of (input_ids, target_ids) or None if index is out of bounds
+    fn get(&self, idx: usize) -> Option<(Vec<u32>, Vec<u32>)> {
+        if idx >= self.len() {
+            return None;
+        }
+        Some((self.input_ids[idx].clone(), self.target_ids[idx].clone()))
+    }
 }
 
 /// Downloads a file from a URL with progress reporting.
@@ -988,6 +1088,124 @@ async fn handle_sliding_window(
         println!("    print(encoding.decode(context), \"---->\", encoding.decode([desired]))");
     }
     println!("```");
+    
+    Ok(())
+}
+
+/// Handles the dataset subcommand, demonstrating GPTDatasetV1 for training data preparation.
+///
+/// # Arguments
+///
+/// * `file_path` - Optional file path to read text from
+/// * `max_length` - Maximum sequence length for each sample
+/// * `stride` - How many tokens to move forward between samples
+/// * `num_samples` - Number of samples to display
+/// * `show_decoded` - Whether to show decoded text
+/// * `verbose` - Whether to show dataset statistics
+async fn handle_dataset(
+    file_path: Option<String>,
+    max_length: usize,
+    stride: usize,
+    num_samples: usize,
+    show_decoded: bool,
+    verbose: bool,
+) -> Result<(), Box<dyn Error>> {
+    // Determine the file path to use
+    let path = file_path.unwrap_or_else(|| VERDICT_FILENAME.to_string());
+    
+    // Check if file exists, download if necessary
+    if !Path::new(&path).exists() {
+        println!("File not found. Downloading from: {}", VERDICT_URL);
+        download_file(VERDICT_URL, Some(&path)).await?;
+    }
+    
+    // Read the text
+    println!("Loading text from: {}", path);
+    let text = fs::read_to_string(&path).await?;
+    println!("Text length: {} characters", text.len());
+    
+    // Create the dataset
+    println!("\n{}", "Creating GPTDatasetV1...".bold());
+    println!("Parameters:");
+    println!("  max_length: {}", max_length);
+    println!("  stride: {}", stride);
+    
+    let dataset = GPTDatasetV1::new(&text, max_length, stride);
+    
+    // Show dataset statistics
+    println!("\n{}", "Dataset Statistics:".bold());
+    println!("  Total samples: {}", dataset.len());
+    println!("  Input shape per sample: [{}]", max_length);
+    println!("  Target shape per sample: [{}]", max_length);
+    
+    if verbose {
+        // Calculate total tokens
+        let tokenizer = r50k_base().unwrap();
+        let total_tokens = tokenizer.encode_with_special_tokens(&text).len();
+        println!("  Total tokens in text: {}", total_tokens);
+        println!("  Coverage: {:.1}%", (dataset.len() * stride) as f64 / total_tokens as f64 * 100.0);
+        println!("  Overlap between samples: {} tokens", max_length - stride);
+    }
+    
+    // Display sample data
+    println!("\n{}", "Sample Data:".bold());
+    let samples_to_show = if num_samples == 0 {
+        dataset.len()
+    } else {
+        min(num_samples, dataset.len())
+    };
+    
+    for i in 0..samples_to_show {
+        if let Some((input_ids, target_ids)) = dataset.get(i) {
+            println!("\n{} {}", "Sample".cyan(), format!("{}", i).yellow());
+            
+            // Show raw token IDs
+            println!("  {}: {:?}", "Input IDs".green(), input_ids);
+            println!("  {}: {:?}", "Target IDs".red(), target_ids);
+            
+            // Show decoded text if requested
+            if show_decoded {
+                let tokenizer = r50k_base().unwrap();
+                
+                let input_text = tokenizer.decode(input_ids.clone()).unwrap();
+                let target_text = tokenizer.decode(target_ids.clone()).unwrap();
+                
+                println!("  {} {:?}", "Input Text:".green(), input_text);
+                println!("  {} {:?}", "Target Text:".red(), target_text);
+            }
+        }
+    }
+    
+    // Show how to use with DataLoader (conceptual, as Burn's DataLoader is different from PyTorch)
+    println!("\n{}", "Usage with Burn DataLoader:".bold());
+    println!("{}", "```rust".dimmed());
+    println!("// In a training context, you would use:");
+    println!("// let dataloader = DataLoaderBuilder::new(batcher)");
+    println!("//     .batch_size(8)");
+    println!("//     .shuffle(42)");
+    println!("//     .build(dataset);");
+    println!("//");
+    println!("// for batch in dataloader {{");
+    println!("//     let (inputs, targets) = batch;");
+    println!("//     // ... training step");
+    println!("// }}");
+    println!("{}", "```".dimmed());
+    
+    // Show Python equivalent
+    println!("\n{}", "Python Equivalent:".bold());
+    println!("{}", "```python".dimmed());
+    println!("class GPTDatasetV1(Dataset):");
+    println!("    def __init__(self, txt, tokenizer, max_length, stride):");
+    println!("        self.input_ids = []");
+    println!("        self.target_ids = []");
+    println!("        token_ids = tokenizer.encode(txt)");
+    println!("        ");
+    println!("        for i in range(0, len(token_ids) - max_length, stride):");
+    println!("            input_chunk = token_ids[i:i + max_length]");
+    println!("            target_chunk = token_ids[i + 1: i + max_length + 1]");
+    println!("            self.input_ids.append(torch.tensor(input_chunk))");
+    println!("            self.target_ids.append(torch.tensor(target_chunk))");
+    println!("{}", "```".dimmed());
     
     Ok(())
 }
@@ -1650,6 +1868,58 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 println!("- This is how GPT models are trained to generate text");
             }
 
+            // Step 12: Demonstrate GPTDatasetV1 for batch training data preparation
+            println!();
+            println!("Step 12: Create GPTDatasetV1 for batch training");
+            println!("Python equivalent:");
+            println!("  class GPTDatasetV1(Dataset):");
+            println!("      def __init__(self, txt, tokenizer, max_length, stride):");
+            println!("          self.input_ids = []");
+            println!("          self.target_ids = []");
+            println!("          token_ids = tokenizer.encode(txt)");
+            println!("          for i in range(0, len(token_ids) - max_length, stride):");
+            println!("              input_chunk = token_ids[i:i + max_length]");
+            println!("              target_chunk = token_ids[i + 1: i + max_length + 1]");
+            println!("              self.input_ids.append(torch.tensor(input_chunk))");
+            println!("              self.target_ids.append(torch.tensor(target_chunk))");
+            println!();
+            println!("  dataset = GPTDatasetV1(raw_text, tokenizer, max_length=4, stride=1)");
+            println!("  print(f\"Total samples: {{len(dataset)}}\")");
+            println!();
+
+            // Create the dataset with the same parameters
+            let dataset = GPTDatasetV1::new(&raw_text, 4, 1);
+            
+            println!("Creating GPTDatasetV1 with max_length=4, stride=1...");
+            println!("Total samples: {}", dataset.len());
+            println!();
+            
+            // Show first few samples
+            println!("First 3 samples:");
+            for i in 0..3.min(dataset.len()) {
+                if let Some((input_ids, target_ids)) = dataset.get(i) {
+                    println!();
+                    println!("Sample {}:", i);
+                    println!("  Input IDs:  {:?}", input_ids);
+                    println!("  Target IDs: {:?}", target_ids);
+                    
+                    // Decode to show text
+                    let input_text = encoding.decode(input_ids).unwrap();
+                    let target_text = encoding.decode(target_ids).unwrap();
+                    
+                    println!("  Input:  {:?}", input_text);
+                    println!("  Target: {:?}", target_text);
+                }
+            }
+            
+            println!();
+            println!("Key insights:");
+            println!("- GPTDatasetV1 creates all input-target pairs upfront");
+            println!("- Each sample is a vector of token IDs ready for batch processing");
+            println!("- The stride parameter controls overlap between samples");
+            println!("- This format is ideal for training with DataLoaders");
+            println!("- In production with Burn, these would be converted to tensors");
+
             println!("\n=== Demo Complete ===");
             println!(
                 "The file '{}' has been tokenized and prepared for training.",
@@ -1685,6 +1955,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
             show_decoded,
         } => {
             handle_sliding_window(file_path, context_size, start_pos, max_windows, show_decoded).await?;
+        }
+        Commands::Dataset {
+            file_path,
+            max_length,
+            stride,
+            num_samples,
+            show_decoded,
+            verbose,
+        } => {
+            handle_dataset(file_path, max_length, stride, num_samples, show_decoded, verbose).await?;
         }
     }
 

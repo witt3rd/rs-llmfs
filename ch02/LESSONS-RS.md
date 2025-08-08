@@ -564,6 +564,11 @@ impl Theme {
    - Encoding/decoding speed
    - Memory usage
 5. Add support for other tiktoken encodings (cl100k_base for GPT-4, p50k_base, etc.)
+6. Extend GPTDatasetV1 to support:
+   - Multiple text files as input
+   - Saving/loading dataset to disk (serialization)
+   - Random sampling with a seed for reproducibility
+   - Dataset splitting (train/validation/test)
 
 ### Advanced
 
@@ -601,91 +606,119 @@ impl Theme {
 
 ## Connecting to Future Chapters
 
-This chapter's patterns will be essential for:
+This chapter's Rust patterns will be foundational for:
 
-- **Streaming tokenization** of large text files
-- **Concurrent data preprocessing**
-- **Training progress monitoring**
-- **Model checkpoint saving**
+- **Stream processing** with large files
+- **Concurrent operations** with async/await
+- **Progress reporting** in long-running operations
+- **File I/O** and data persistence
 
-### 13. **Integrating External Tokenizers: tiktoken-rs**
+### 13. **Working with External Crates: API Differences**
+
+When integrating external crates, you often encounter API differences from other language equivalents:
 
 ```rust
-use tiktoken_rs::r50k_base;
+use some_external_crate::SomeType;
 
-// Load pre-trained GPT-2 tokenizer
-let encoding = r50k_base()?;
+// The Rust API might differ from Python/JavaScript/etc
+let result = some_type.method(arg1, arg2);  // Returns tuple
+let (data, metadata) = result;  // Destructure to use
 
-// Handle special tokens correctly
-let allowed_special = encoding.special_tokens();
-
-// Encode returns tuple (tokens, total_tokens)
-let (tokens, _) = encoding.encode(text, &allowed_special);
-
-// Decode requires owned Vec, not borrowed slice
-let decoded = encoding.decode(tokens.clone())?;
+// Decode requires owned data, not borrowed
+let output = decoder.process(data.clone())?;  // Need to clone
 ```
 
-Key lessons from tiktoken integration:
+Key Rust patterns when adapting external APIs:
 
-#### API Adaptation Patterns
-
-When wrapping external libraries, you often need to adapt their APIs:
+#### Handling Different Method Signatures
 
 ```rust
-// ❌ tiktoken-rs doesn't have these (from Python API):
-encoding.base_vocabulary_size()  // Not exposed
-encoding.encode(text, allowed_special, disallowed)  // Different signature
+// External crate might not expose all methods from original library
+// Solution: Create adapter functions
 
-// ✅ Adapt to what's available:
-let (tokens, _count) = encoding.encode(text, &allowed_special);
+fn adapt_external_api(input: &str) -> Result<Vec<u32>, Box<dyn Error>> {
+    let external = ExternalType::new()?;
+    let (result, _metadata) = external.process(input, Default::default());
+    Ok(result)
+}
 ```
 
-#### Working with Pre-compiled Data
-
-tiktoken uses pre-compiled BPE (Byte Pair Encoding) models:
+#### Owned vs Borrowed Data Requirements
 
 ```rust
-// r50k_base() loads a 50,257 token vocabulary
-// This is embedded in the binary at compile time
-let encoding = r50k_base()?;
-
-// Versus our simple tokenizer that builds vocabulary at runtime:
-let vocab: HashMap<String, usize> = build_vocabulary(&text);
-```
-
-Benefits:
-
-- **No training required**: Use OpenAI's pre-trained models
-- **Consistent tokenization**: Same as GPT-2/GPT-3
-- **Efficient**: BPE handles subword tokenization well
-- **Special token support**: Built-in handling of <|endoftext|>, etc.
-
-Trade-offs:
-
-- **Binary size**: Embedded vocabulary adds ~1MB
-- **Fixed vocabulary**: Can't customize for domain-specific text
-- **API differences**: Rust API differs from Python tiktoken
-
-#### Creating a Unified Interface
-
-When supporting multiple tokenizers, create a common trait:
-
-```rust
-// Abstract over different tokenizer implementations
-trait Tokenizer {
-    fn encode(&self, text: &str) -> Vec<usize>;
-    fn decode(&self, tokens: &[usize]) -> Result<String, String>;
-    fn vocab_size(&self) -> usize;
+// Some APIs require owned data (Vec<T>) not borrowed (&[T])
+fn process_data(data: &[u32]) -> Result<String, Error> {
+    // API needs Vec<u32>, we have &[u32]
+    let owned_data = data.to_vec();  // Clone when necessary
+    external_api.decode(owned_data)
 }
 
-// Then implement for each tokenizer type
-impl Tokenizer for TiktokenWrapper { ... }
-impl Tokenizer for SimpleTokenizerV1 { ... }
-impl Tokenizer for SimpleTokenizerV2 { ... }
+// Alternative: Check if API has a borrowed variant
+fn process_data_efficient(data: &[u32]) -> Result<String, Error> {
+    // Some APIs offer both
+    external_api.decode_borrowed(data)  // If available
+}
 ```
 
-This allows switching tokenizers without changing calling code.
+#### Working with Embedded Resources
+
+```rust
+// Some crates embed data at compile time
+static EMBEDDED_DATA: &[u8] = include_bytes!("../resources/data.bin");
+
+// Or use lazy_static for complex initialization
+lazy_static! {
+    static ref COMPILED_RESOURCE: Resource = {
+        Resource::from_embedded(EMBEDDED_DATA)
+    };
+}
+
+// Access the pre-compiled resource
+let resource = &*COMPILED_RESOURCE;
+```
+
+Trade-offs of embedded data:
+- **Binary size**: Increases executable size
+- **Memory**: Loaded once, shared across program
+- **Performance**: No runtime loading overhead
+- **Flexibility**: Can't change without recompiling
+
+#### Creating Abstraction Layers
+
+When working with multiple similar crates, create a trait to abstract differences:
+
+```rust
+// Define common interface
+trait DataProcessor {
+    fn process(&self, input: &str) -> Vec<u32>;
+    fn reverse(&self, data: Vec<u32>) -> Result<String, String>;
+}
+
+// Implement for each concrete type
+struct CrateAWrapper(CrateAType);
+impl DataProcessor for CrateAWrapper {
+    fn process(&self, input: &str) -> Vec<u32> {
+        // Adapt CrateA's API to our interface
+        self.0.encode(input).into_iter().collect()
+    }
+    
+    fn reverse(&self, data: Vec<u32>) -> Result<String, String> {
+        self.0.decode(data).map_err(|e| e.to_string())
+    }
+}
+
+// Now code can work with any implementation
+fn use_processor(processor: &dyn DataProcessor) {
+    let data = processor.process("hello");
+    let text = processor.reverse(data).unwrap();
+}
+```
+
+This pattern provides:
+- **Flexibility**: Swap implementations easily
+- **Testability**: Mock implementations for tests
+- **Maintainability**: Changes isolated to wrapper
+- **Type safety**: Compiler enforces interface
 
 ### 14. **Subcommand Design for Educational Tools**
 
@@ -825,4 +858,148 @@ This chapter introduced fundamental Rust patterns through a practical tool. We l
 4. **HashSet Operations**: Use `.iter()` not `.keys()` on HashSet, unlike HashMap which has `.keys()`
 5. **Error Mapping**: Convert library-specific errors to Box<dyn Error> with `.map_err(|e| format!("..."))?`
 
-These patterns demonstrate real-world Rust development: adapting external crates, managing ownership, and creating clean APIs while maintaining type safety and performance.
+### 16. **Type Adaptation for External Libraries**
+
+When working with external crates, you often need to adapt between different numeric types:
+
+```rust
+// tiktoken-rs returns Vec<u32> for token IDs
+let token_ids: Vec<u32> = tokenizer.encode_with_special_tokens(text);
+
+// But you might need usize for indexing
+let token_ids_usize: Vec<usize> = token_ids.iter().map(|&x| x as usize).collect();
+
+// Or when interfacing with ML libraries that expect different types
+let token_ids_i32: Vec<i32> = token_ids.iter().map(|&x| x as i32).collect();
+```
+
+Key considerations:
+
+- **Know your library's types**: tiktoken uses `u32` (Rank type alias)
+- **Check for overflow**: When converting between signed/unsigned or different sizes
+- **Performance**: Use iterators to avoid extra allocations when possible
+- **Be explicit**: Use `as` casts when the conversion is safe and intentional
+
+### 17. **Implementing Dataset Pattern Without Heavy Dependencies**
+
+When a library has issues (like Burn's compilation error), you can implement the pattern with plain Rust:
+
+```rust
+// Instead of using Burn tensors immediately
+struct GPTDatasetV1 {
+    input_ids: Vec<Vec<u32>>,  // Plain vectors instead of tensors
+    target_ids: Vec<Vec<u32>>,
+}
+
+// This allows you to:
+// 1. Prototype without complex dependencies
+// 2. Test logic independently
+// 3. Add tensor support later when needed
+// 4. Keep compile times fast during development
+```
+
+This demonstrates **incremental development**: Start simple, add complexity when needed.
+
+### 18. **Iterator Patterns for Data Processing**
+
+Creating sliding windows efficiently with iterators:
+
+```rust
+// Creating overlapping sequences
+let mut i = 0;
+while i + max_length < token_ids.len() {
+    let input_chunk = token_ids[i..i + max_length].to_vec();
+    let target_chunk = token_ids[i + 1..i + max_length + 1].to_vec();
+    
+    input_ids.push(input_chunk);
+    target_ids.push(target_chunk);
+    
+    i += stride;
+}
+```
+
+Alternative iterator-based approach (more idiomatic):
+
+```rust
+let windows: Vec<(Vec<u32>, Vec<u32>)> = (0..token_ids.len() - max_length)
+    .step_by(stride)
+    .map(|i| {
+        let input = token_ids[i..i + max_length].to_vec();
+        let target = token_ids[i + 1..i + max_length + 1].to_vec();
+        (input, target)
+    })
+    .collect();
+```
+
+### 19. **Method Design for Different Use Cases**
+
+Providing multiple methods for different access patterns:
+
+```rust
+impl GPTDatasetV1 {
+    // For training loops that need tensors (future)
+    fn get(&self, idx: usize) -> Option<(Vec<u32>, Vec<u32>)> {
+        // Returns cloned data for ownership
+    }
+    
+    // For display/debugging that needs raw values
+    fn get_ref(&self, idx: usize) -> Option<(&[u32], &[u32])> {
+        // Returns borrowed slices to avoid cloning
+    }
+    
+    // For statistics that need all data
+    fn iter(&self) -> impl Iterator<Item = (&[u32], &[u32])> {
+        // Iterator over all samples
+    }
+}
+```
+
+This pattern provides flexibility without sacrificing performance.
+
+### 20. **Conditional Compilation and Feature Management**
+
+When dealing with problematic dependencies:
+
+```rust
+// In Cargo.toml
+[dependencies]
+# burn = { version = "0.14", optional = true }
+
+[features]
+default = []
+# ml = ["burn", "burn-ndarray"]
+
+// In code
+#[cfg(feature = "ml")]
+use burn::tensor::Tensor;
+
+#[cfg(not(feature = "ml"))]
+type Tensor = Vec<u32>;  // Fallback type
+```
+
+This allows users to opt-in to heavy dependencies while keeping the core functionality available.
+
+### 21. **Display Formatting for Educational Output**
+
+Creating clear, educational output with proper formatting:
+
+```rust
+// Show both raw data and human-readable format
+println!("  {}: {:?}", "Input IDs".green(), input_ids);
+println!("  {} {:?}", "Input Text:".green(), input_text);
+
+// Use color coding to distinguish different types of information
+println!("\n{}", "Dataset Statistics:".bold());
+println!("  Total samples: {}", dataset.len());
+println!("  Coverage: {:.1}%", coverage);
+
+// Include code examples for learning
+println!("\n{}", "Python Equivalent:".bold());
+println!("{}", "```python".dimmed());
+println!("class GPTDatasetV1(Dataset):");
+println!("{}", "```".dimmed());
+```
+
+This helps users understand both the implementation and its equivalent in other languages.
+
+These patterns demonstrate real-world Rust development: adapting external crates, managing ownership, creating clean APIs while maintaining type safety and performance, and gracefully handling dependency issues.

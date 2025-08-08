@@ -102,46 +102,127 @@ Key dependencies:
 
 ## Working with LESSONS Files
 
-**IMPORTANT**: These files have distinct purposes and should maintain clear separation of concerns:
+**CRITICAL**: These files serve completely different audiences and purposes. They must maintain strict separation of concerns.
 
-- **LESSONS-LLM.md**: Focuses EXCLUSIVELY on LLM/ML concepts, theory, and algorithms
-- **LESSONS-RS.md**: Focuses EXCLUSIVELY on Rust language features, patterns, and best practices
+### Core Distinction
 
-### LESSONS-LLM.md Structure
+- **LESSONS-LLM.md**: Teaches **WHAT** we're building (LLM/ML concepts) - for people learning about language models
+- **LESSONS-RS.md**: Teaches **HOW** to build it in Rust (language patterns) - for people learning Rust programming
 
-Each LESSONS-LLM.md should contain ML/LLM-specific content:
+### LESSONS-LLM.md - Machine Learning Concepts Only
 
-1. **Chapter Overview** - What LLM concepts are covered
-2. **Key Concepts** - Core ML/LLM ideas with explanations (tokenization, attention, etc.)
-3. **Why This Matters** - How it connects to building complete LLMs
-4. **Prerequisites** - What ML/LLM concepts readers should understand first
-5. **Looking Ahead** - How this prepares for future LLM chapters
-6. **NO Rust-specific content** - Implementation details belong in LESSONS-RS.md
+#### Purpose
+Documents the machine learning and LLM theory being implemented. This file teaches ML concepts, NOT programming.
 
-Examples of appropriate content:
-- Tokenization theory (BPE, WordPiece, etc.)
-- Model architectures (transformers, attention mechanisms)
-- Training concepts (loss functions, optimization)
-- Data preparation for ML
+#### Content Requirements
 
-### LESSONS-RS.md Structure
+1. **Chapter Overview** - What LLM/ML concepts are covered
+2. **Key Concepts** - Core ML theory (tokenization, attention, training, etc.)
+3. **Mathematical Foundations** - Equations, algorithms, theoretical background
+4. **Why This Matters** - How it connects to building complete LLMs
+5. **Prerequisites** - What ML/LLM concepts readers should understand first
+6. **Looking Ahead** - How this prepares for future LLM chapters
+7. **Implementation Notes** - Brief mention that concepts are implemented in Rust (1-2 sentences max)
 
-Each LESSONS-RS.md should contain Rust-specific content:
+#### Code Examples
+- **Use Rust syntax** since that's our implementation language
+- **Focus on WHAT the code does** (ML perspective), not HOW Rust works
+- **No Rust idiom explanations** - don't explain ownership, borrowing, traits, etc.
 
-1. **Rust Concepts Introduced** - New language features used
-2. **Patterns and Idioms** - Best practices demonstrated
-3. **Common Pitfalls** - What to watch out for in Rust
+#### Strictly FORBIDDEN in LESSONS-LLM.md
+- ❌ Rust language tutorials or explanations
+- ❌ Command-line usage instructions (belongs in README)
+- ❌ Rust error handling patterns
+- ❌ Cargo/crate management
+- ❌ Performance optimizations specific to Rust
+- ❌ Comparing Rust to other languages
+
+#### Good Example
+```markdown
+## Tokenization
+
+Tokenization converts text into numerical representations. Byte-Pair Encoding (BPE) 
+builds a vocabulary through iterative merging of frequent character pairs.
+
+\```rust
+// BPE merges the most frequent pair
+let most_frequent = find_most_frequent_pair(&tokens);
+tokens = merge_pair(tokens, most_frequent);
+\```
+
+This process continues until reaching the target vocabulary size, balancing 
+between character-level and word-level representations.
+```
+
+### LESSONS-RS.md - Rust Programming Patterns Only
+
+#### Purpose
+Documents Rust programming patterns, idioms, and techniques. This file teaches Rust, using the LLM project as a vehicle for learning.
+
+#### Content Requirements
+
+1. **Rust Concepts Introduced** - New language features demonstrated
+2. **Patterns and Idioms** - Best practices and idiomatic Rust
+3. **Common Pitfalls** - Rust-specific gotchas and how to avoid them
 4. **Performance Notes** - Why certain Rust approaches were chosen
-5. **Exercises** - Ways to extend or modify the Rust code for learning
-6. **NO LLM theory** - ML concepts belong in LESSONS-LLM.md
+5. **Error Handling** - How to properly handle errors in Rust
+6. **Memory Management** - Ownership, borrowing, lifetimes as needed
+7. **Exercises** - Rust-focused coding challenges
 
-Examples of appropriate content:
-- Ownership and borrowing patterns
-- Async/await implementation
-- Error handling with Result/Option
-- Trait design and implementation
-- External crate integration
-- API adaptation from Python to Rust
+#### Code Examples
+- **Focus on HOW Rust works**, not what the ML algorithm does
+- **Explain Rust-specific patterns** - ownership, traits, generics, etc.
+- **Show alternative implementations** to teach different Rust approaches
+
+#### Strictly FORBIDDEN in LESSONS-RS.md
+- ❌ ML/LLM theory or algorithms
+- ❌ Tokenization explanations
+- ❌ Neural network architecture
+- ❌ Training concepts
+- ❌ Mathematical foundations
+- ❌ References to "GPT", "transformer", "attention" etc. except in passing
+
+#### Good Example
+```markdown
+## Working with External Crates
+
+When integrating external crates, handle API differences:
+
+\```rust
+// External crate requires owned data
+fn process(data: &[u32]) -> Result<String, Error> {
+    let owned = data.to_vec();  // Clone when necessary
+    external_api.decode(owned)
+}
+\```
+
+This pattern shows when to convert borrowed slices to owned vectors,
+a common requirement when adapting external APIs.
+```
+
+### Common Mistakes to Avoid
+
+1. **Mixing Concerns**: Don't explain Rust ownership in LESSONS-LLM.md
+2. **Wrong Audience**: LESSONS-LLM readers care about ML, not Rust syntax
+3. **Command Instructions**: CLI usage belongs in README, not LESSONS files
+4. **Theory in Wrong Place**: Don't explain BPE algorithm in LESSONS-RS.md
+5. **Language Comparisons**: Don't compare Python/Rust in either file
+
+### Quick Test for Correct Placement
+
+Ask yourself:
+- Is this about **ML/AI theory**? → LESSONS-LLM.md
+- Is this about **Rust programming**? → LESSONS-RS.md
+- Is this about **how to run the code**? → README.md
+- Is this about **both ML and Rust**? → Split it into both files appropriately
+
+### When Updating LESSONS Files
+
+1. **Read the existing file first** to understand its focus
+2. **Maintain the separation** - don't let concerns bleed across files
+3. **Use appropriate terminology** - ML terms in LLM file, Rust terms in RS file
+4. **Keep examples focused** - one teaching goal per example
+5. **Review after writing** - would a pure ML student or pure Rust learner understand?
 
 ## Development Notes
 

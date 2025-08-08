@@ -24,12 +24,11 @@ This chapter introduces the fundamental first step in building any language mode
 
 Understanding your data before processing:
 
-```python
-# Book example:
-with open("the-verdict.txt", "r", encoding="utf-8") as f:
-    raw_text = f.read()
-print("Total number of character:", len(raw_text))
-print(raw_text[:99])
+```rust
+// Book example implemented in Rust:
+let raw_text = fs::read_to_string("the-verdict.txt").await?;
+println!("Total number of characters: {}", raw_text.len());
+println!("{}", &raw_text[..99.min(raw_text.len())]);
 ```
 
 Key metrics to examine:
@@ -59,12 +58,17 @@ Tokenization is the process of converting text into numerical representations th
 
 #### Simple Tokenization Approaches
 
-```python
-# Word-level tokenization (our SimpleTokenizerV1)
-text = "Hello, world!"
-tokens = text.split()  # ["Hello,", "world!"]
-vocab = {word: idx for idx, word in enumerate(unique_words)}
-ids = [vocab[word] for word in tokens]
+```rust
+// Word-level tokenization (our SimpleTokenizerV1)
+let text = "Hello, world!";
+let tokens: Vec<&str> = text.split_whitespace().collect();  // ["Hello,", "world!"]
+let vocab: HashMap<String, usize> = unique_words.into_iter()
+    .enumerate()
+    .map(|(idx, word)| (word, idx))
+    .collect();
+let ids: Vec<usize> = tokens.iter()
+    .map(|word| vocab[word])
+    .collect();
 ```
 
 Limitations:
@@ -77,11 +81,11 @@ Limitations:
 
 Modern LLMs use Byte Pair Encoding (BPE) as implemented in tiktoken:
 
-```python
-import tiktoken
-encoding = tiktoken.get_encoding("r50k_base")  # GPT-2 tokenizer
-tokens = encoding.encode("Hello, world!")
-# Produces: [15496, 11, 995, 0]  # Fewer tokens, handles any text
+```rust
+use tiktoken_rs::r50k_base;
+let encoding = r50k_base()?;  // GPT-2 tokenizer
+let tokens = encoding.encode_with_special_tokens("Hello, world!");
+// Produces: [15496, 11, 995, 0]  // Fewer tokens, handles any text
 ```
 
 Advantages:
@@ -130,80 +134,18 @@ To fully understand this chapter, you should be familiar with:
 - Command-line interfaces
 - File system organization
 
-## Practical Implementation
+## Implementation Notes
 
-Our Rust implementation provides comprehensive text processing capabilities:
+Our Rust implementation demonstrates all the concepts from this chapter:
 
-### 1. **Guided Demo Mode**
+- Text corpus acquisition and management
+- Multiple tokenization approaches (word-level, subword/BPE)
+- Vocabulary building and token encoding/decoding
+- Sliding window creation for training data
+- GPTDatasetV1 for organizing context-target pairs
+- Comparative analysis of tokenization efficiency
 
-Replicates the exact book examples with all 10 steps:
-
-```bash
-cargo run -p ch02 -- demo
-```
-
-- Downloads "the-verdict.txt"
-- Analyzes character, line, and word counts
-- Demonstrates text splitting (whitespace, punctuation, comprehensive)
-- Builds vocabulary from unique tokens
-- Implements SimpleTokenizerV1 (with error on unknown tokens)
-- Implements SimpleTokenizerV2 (with <|unk|> handling)
-- Shows special token usage (<|endoftext|>)
-- **NEW: Demonstrates tiktoken (GPT-2 BPE tokenizer)**
-- Compares tokenization efficiency across methods
-
-### 2. **Generic Download Tool**
-
-For experimenting with different texts:
-
-```bash
-cargo run -p ch02 -- download <URL> <output-path>
-```
-
-### 3. **Text Analysis Tool**
-
-For examining any text file:
-
-```bash
-cargo run -p ch02 -- analyze <file-path> --preview-length 200
-```
-
-### 4. **Text Splitting Tool**
-
-Visual demonstration of tokenization patterns:
-
-```bash
-cargo run -p ch02 -- split --method all --max-display 50
-```
-
-Methods available:
-
-- `ws`: Whitespace only
-- `punct`: Whitespace + basic punctuation
-- `all`: Comprehensive punctuation (as in book)
-
-### 5. **Tokenizer Comparison Tool**
-
-Compare different tokenization approaches:
-
-```bash
-# Use tiktoken (GPT-2)
-cargo run -p ch02 -- tokenize --tokenizer tiktoken --detailed
-
-# Use simple tokenizer V1 (requires vocabulary)
-cargo run -p ch02 -- tokenize --tokenizer v1
-
-# Use simple tokenizer V2 (with <|unk|> handling)
-cargo run -p ch02 -- tokenize --tokenizer v2
-```
-
-Options:
-
-- `--text "custom text"`: Provide custom text
-- `--file-path path/to/file`: Tokenize a file
-- `--detailed`: Show token-by-token breakdown
-
-This modular approach allows both guided learning and experimentation with real tokenization strategies used in production LLMs.
+The implementation follows the book's progression while adapting Python/PyTorch patterns to idiomatic Rust.
 
 ## Looking Ahead
 
@@ -267,6 +209,110 @@ But for: "supercalifragilisticexpialidocious"
 - **Generation quality**: Can create novel words through subword combination
 - **Cross-lingual transfer**: Shared subwords enable multilingual models
 
+## Training Data Preparation
+
+### Sliding Windows for Context-Target Pairs
+
+Language models learn to predict the next token given a context. We create training data using a sliding window approach:
+
+```rust
+// For each position in the text, create a training example
+let context_size = 4;
+for i in 0..tokens.len() - context_size {
+    let input_chunk = &tokens[i..i + context_size];      // Context: [t0, t1, t2, t3]
+    let target_chunk = &tokens[i + 1..i + context_size + 1];  // Target: [t1, t2, t3, t4]
+}
+```
+
+This creates overlapping sequences where:
+- **Input**: A sequence of tokens representing the context
+- **Target**: The same sequence shifted by one token (what to predict)
+
+#### Growing Context Windows
+
+During training, models learn from progressively larger contexts:
+
+```
+Position 0: []           → predict token 0
+Position 1: [t0]         → predict token 1  
+Position 2: [t0, t1]     → predict token 2
+Position 3: [t0, t1, t2] → predict token 3
+...
+```
+
+This teaches the model to generate text with varying amounts of context, from starting fresh to continuing long passages.
+
+### GPTDatasetV1: Batch Training Data
+
+For efficient training, we organize sliding windows into a dataset:
+
+```rust
+struct GPTDatasetV1 {
+    input_ids: Vec<Vec<u32>>,
+    target_ids: Vec<Vec<u32>>,
+}
+
+impl GPTDatasetV1 {
+    fn new(text: &str, max_length: usize, stride: usize) -> Self {
+        let tokenizer = r50k_base().unwrap();
+        let token_ids = tokenizer.encode_with_special_tokens(text);
+        
+        let mut input_ids = Vec::new();
+        let mut target_ids = Vec::new();
+        
+        // Create all training pairs upfront
+        let mut i = 0;
+        while i + max_length < token_ids.len() {
+            let input_chunk = token_ids[i..i + max_length].to_vec();
+            let target_chunk = token_ids[i + 1..i + max_length + 1].to_vec();
+            input_ids.push(input_chunk);
+            target_ids.push(target_chunk);
+            i += stride;
+        }
+        
+        GPTDatasetV1 { input_ids, target_ids }
+    }
+}
+```
+
+Key parameters:
+- **max_length**: Size of each context window (e.g., 256, 1024 tokens)
+- **stride**: How many tokens to skip between samples
+  - stride=1: Maximum overlap, most training examples
+  - stride=max_length: No overlap, fewer examples
+
+#### Trade-offs in Data Preparation
+
+| Parameter | Small Value | Large Value |
+|-----------|------------|-------------|
+| **max_length** | Faster training, less context | Slower training, more context |
+| **stride** | More examples, high overlap | Fewer examples, no redundancy |
+
+Example with max_length=4, stride=1:
+```
+Sample 0: [I, had, always, thought] → [had, always, thought, Jack]
+Sample 1: [had, always, thought, Jack] → [always, thought, Jack, was]
+Sample 2: [always, thought, Jack, was] → [thought, Jack, was, clever]
+```
+
+### Why This Approach Works
+
+1. **Dense supervision**: Every token position provides a learning signal
+2. **Context variety**: Model sees tokens in many different contexts
+3. **Efficient batching**: Fixed-size tensors enable GPU parallelization
+4. **Natural curriculum**: Short contexts are easier, preparing for longer ones
+
+### Connection to Transformer Training
+
+This data preparation directly feeds into the transformer training loop:
+
+1. **Forward pass**: Input tokens → transformer → predicted tokens
+2. **Loss calculation**: Compare predictions with target tokens
+3. **Backpropagation**: Update weights to improve predictions
+4. **Repeat**: Process millions/billions of such examples
+
+The quality and diversity of these context-target pairs directly determine model capabilities.
+
 ## Key Takeaways
 
 1. **Data is the foundation** - Time invested in proper data acquisition pays dividends
@@ -275,6 +321,8 @@ But for: "supercalifragilisticexpialidocious"
 4. **Document everything** - Track data sources, versions, and processing steps
 5. **Tokenization matters** - Choice of tokenizer fundamentally affects model capabilities
 6. **BPE is production-ready** - Simple tokenizers help understanding, BPE powers real systems
+7. **Sliding windows create training data** - Every position in text becomes a learning opportunity
+8. **Batch preparation enables efficient training** - GPTDataset organizes data for parallel processing
 
 ## Reflection Questions
 
