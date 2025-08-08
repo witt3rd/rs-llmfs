@@ -388,6 +388,28 @@ enum Commands {
         #[arg(short, long)]
         detailed: bool,
     },
+    /// Demonstrate sliding windows over encoded text for training data preparation
+    SlidingWindow {
+        /// Path to text file (defaults to the-verdict.txt if not provided)
+        #[arg(short, long)]
+        file_path: Option<String>,
+
+        /// Context size (window size) for sliding window
+        #[arg(short, long, default_value = "4")]
+        context_size: usize,
+
+        /// Starting position in the encoded text
+        #[arg(short, long, default_value = "50")]
+        start_pos: usize,
+
+        /// Maximum number of windows to display
+        #[arg(short, long, default_value = "10")]
+        max_windows: usize,
+
+        /// Show decoded text for each window
+        #[arg(short = 'd', long)]
+        show_decoded: bool,
+    },
 }
 
 /// Downloads a file from a URL with progress reporting.
@@ -780,6 +802,193 @@ async fn handle_split(
         println!();
     }
 
+    Ok(())
+}
+
+/// Handles the sliding window subcommand, demonstrating training data preparation.
+///
+/// This replicates the book's Python example for creating input-output pairs:
+/// ```python
+/// enc_sample = enc_text[50:]
+/// context_size = 4
+/// x = enc_sample[:context_size]
+/// y = enc_sample[1:context_size+1]
+/// 
+/// for i in range(1, context_size+1):
+///     context = enc_sample[:i]
+///     desired = enc_sample[i]
+///     print(context, "---->", desired)
+/// ```
+async fn handle_sliding_window(
+    file_path: Option<String>,
+    context_size: usize,
+    start_pos: usize,
+    max_windows: usize,
+    show_decoded: bool,
+) -> Result<(), Box<dyn Error>> {
+    // Load the text file
+    let path = file_path.unwrap_or_else(|| VERDICT_FILENAME.to_string());
+    println!("Loading text from: {}", path);
+    
+    if !Path::new(&path).exists() {
+        println!("File not found. Run 'cargo run -p ch02 -- demo' first to download the sample text.");
+        return Err("File not found".into());
+    }
+    
+    let raw_text = fs::read_to_string(&path).await?;
+    println!("Loaded {} characters", raw_text.len());
+    println!();
+    
+    // Use tiktoken for encoding
+    println!("Encoding text with tiktoken (GPT-2 tokenizer)...");
+    let encoding = r50k_base().map_err(|e| format!("Failed to load tokenizer: {}", e))?;
+    let allowed_special = encoding.special_tokens();
+    let (enc_text, _) = encoding.encode(&raw_text, &allowed_special);
+    println!("Total tokens: {}", enc_text.len());
+    println!();
+    
+    // Check if we have enough tokens
+    if enc_text.len() <= start_pos {
+        return Err(format!("Not enough tokens. Text has {} tokens but start position is {}", 
+                          enc_text.len(), start_pos).into());
+    }
+    
+    // Get the sample starting from the specified position
+    let enc_sample = &enc_text[start_pos..];
+    println!("Working with tokens starting at position {}", start_pos);
+    println!("Sample has {} tokens available", enc_sample.len());
+    println!();
+    
+    // Ensure we have enough tokens for the context window
+    if enc_sample.len() <= context_size {
+        return Err(format!("Not enough tokens in sample. Need at least {} but have {}", 
+                          context_size + 1, enc_sample.len()).into());
+    }
+    
+    // Show the initial context window
+    println!("=== Initial Context Window ===");
+    println!("Context size: {}", context_size);
+    println!();
+    
+    let x = &enc_sample[..context_size];
+    let y = &enc_sample[1..context_size + 1];
+    
+    println!("Input (x):  {:?}", x);
+    println!("Target (y): {:?}", y);
+    println!();
+    
+    if show_decoded {
+        let x_decoded = encoding.decode(x.to_vec()).unwrap_or_else(|_| "<decode error>".to_string());
+        let y_decoded = encoding.decode(y.to_vec()).unwrap_or_else(|_| "<decode error>".to_string());
+        println!("Input decoded:  \"{}\"", x_decoded);
+        println!("Target decoded: \"{}\"", y_decoded);
+        println!();
+    }
+    
+    // Show how the context grows from 1 to context_size
+    println!("=== Growing Context Windows ===");
+    println!("Showing how context grows and predicts the next token:");
+    println!();
+    
+    for i in 1..=context_size.min(max_windows) {
+        let context = &enc_sample[..i];
+        let target = enc_sample[i];
+        
+        print!("{:?} ", context);
+        print!("{}", "----->".yellow());
+        println!(" {}", target);
+        
+        if show_decoded {
+            let context_decoded = encoding.decode(context.to_vec())
+                .unwrap_or_else(|_| "<decode error>".to_string());
+            let target_decoded = encoding.decode(vec![target])
+                .unwrap_or_else(|_| "<decode error>".to_string());
+            
+            println!("  \"{}\" {} \"{}\"", 
+                    context_decoded.blue(), 
+                    "----->".yellow(), 
+                    target_decoded.green());
+            println!();
+        }
+    }
+    
+    // Show sliding windows for batch training
+    println!();
+    println!("=== Sliding Windows for Batch Training ===");
+    println!("Each window creates an input-target pair for training:");
+    println!();
+    
+    let num_windows = ((enc_sample.len() - context_size - 1).min(max_windows)).min(10);
+    
+    for i in 0..num_windows {
+        let input_start = i;
+        let input_end = i + context_size;
+        let target_start = i + 1;
+        let target_end = i + context_size + 1;
+        
+        if target_end > enc_sample.len() {
+            break;
+        }
+        
+        let input = &enc_sample[input_start..input_end];
+        let target = &enc_sample[target_start..target_end];
+        
+        println!("Window {}:", i + 1);
+        println!("  Input:  {:?}", input);
+        println!("  Target: {:?}", target);
+        
+        if show_decoded {
+            let input_decoded = encoding.decode(input.to_vec())
+                .unwrap_or_else(|_| "<decode error>".to_string());
+            let target_decoded = encoding.decode(target.to_vec())
+                .unwrap_or_else(|_| "<decode error>".to_string());
+            
+            println!("  Input (decoded):  \"{}\"", input_decoded.blue());
+            println!("  Target (decoded): \"{}\"", target_decoded.green());
+        }
+        println!();
+    }
+    
+    if num_windows < max_windows {
+        println!("(Showing {} windows out of {} possible)", 
+                num_windows, enc_sample.len() - context_size);
+    }
+    
+    println!();
+    println!("Python equivalent:");
+    println!("```python");
+    println!("with open(\"{}\", \"r\", encoding=\"utf-8\") as f:", path);
+    println!("    raw_text = f.read()");
+    println!();
+    println!("# Encode with tiktoken");
+    println!("import tiktoken");
+    println!("encoding = tiktoken.get_encoding(\"r50k_base\")");
+    println!("enc_text = encoding.encode(raw_text)");
+    println!("print(len(enc_text))");
+    println!();
+    println!("# Create sliding windows");
+    println!("enc_sample = enc_text[{}:]", start_pos);
+    println!("context_size = {}", context_size);
+    println!("x = enc_sample[:context_size]");
+    println!("y = enc_sample[1:context_size+1]");
+    println!("print(f\"x: {{x}}\")");
+    println!("print(f\"y: {{y}}\")");
+    println!();
+    println!("# Show growing context");
+    println!("for i in range(1, context_size+1):");
+    println!("    context = enc_sample[:i]");
+    println!("    desired = enc_sample[i]");
+    println!("    print(context, \"---->\", desired)");
+    if show_decoded {
+        println!();
+        println!("# With decoded text");
+        println!("for i in range(1, context_size+1):");
+        println!("    context = enc_sample[:i]");
+        println!("    desired = enc_sample[i]");
+        println!("    print(encoding.decode(context), \"---->\", encoding.decode([desired]))");
+    }
+    println!("```");
+    
     Ok(())
 }
 
@@ -1374,9 +1583,76 @@ async fn main() -> Result<(), Box<dyn Error>> {
             println!("Note: tiktoken uses Byte Pair Encoding (BPE) which creates more");
             println!("efficient tokenization by learning common subword patterns.");
 
+            // Step 11: Demonstrate sliding windows for training data preparation
+            println!();
+            println!("Step 11: Demonstrate sliding windows for training data preparation");
+            println!("Python equivalent:");
+            println!("  # Create training data with sliding windows");
+            println!("  enc_sample = enc_text[50:]");
+            println!("  context_size = 4");
+            println!("  x = enc_sample[:context_size]");
+            println!("  y = enc_sample[1:context_size+1]");
+            println!("  print(f\"x: {{x}}\")");
+            println!("  print(f\"y: {{y}}\")");
+            println!();
+            println!("  for i in range(1, context_size+1):");
+            println!("      context = enc_sample[:i]");
+            println!("      desired = enc_sample[i]");
+            println!("      print(context, \"---->\", desired)");
+            println!();
+
+            // Re-encode the full text for sliding window demo
+            let (full_enc_text, _) = encoding.encode(&raw_text, &allowed_special);
+            
+            // Create sliding windows starting at position 50
+            let start_pos = 50;
+            let context_size = 4;
+            
+            if full_enc_text.len() > start_pos + context_size {
+                let enc_sample = &full_enc_text[start_pos..];
+                
+                println!("Working with {} total tokens, starting at position {}", full_enc_text.len(), start_pos);
+                println!();
+                
+                // Show initial context window
+                let x = &enc_sample[..context_size];
+                let y = &enc_sample[1..context_size + 1];
+                
+                println!("Initial context window:");
+                println!("  Input (x):  {:?}", x);
+                println!("  Target (y): {:?}", y);
+                println!();
+                
+                // Show growing context
+                println!("Growing context windows (how model learns to predict next token):");
+                for i in 1..=context_size {
+                    let context = &enc_sample[..i];
+                    let target = enc_sample[i];
+                    
+                    print!("  {:?} ", context);
+                    print!("{}", "----->".yellow());
+                    println!(" {}", target);
+                    
+                    // Decode to show the actual text
+                    let context_decoded = encoding.decode(context.to_vec()).unwrap_or_else(|_| "<error>".to_string());
+                    let target_decoded = encoding.decode(vec![target]).unwrap_or_else(|_| "<error>".to_string());
+                    
+                    println!("    \"{}\" {} \"{}\"", 
+                            context_decoded.blue(), 
+                            "----->".yellow(), 
+                            target_decoded.green());
+                }
+                
+                println!();
+                println!("This sliding window approach creates input-target pairs for training:");
+                println!("- Each position in the text provides a training example");
+                println!("- The model learns to predict the next token given the context");
+                println!("- This is how GPT models are trained to generate text");
+            }
+
             println!("\n=== Demo Complete ===");
             println!(
-                "The file '{}' has been tokenized and is ready for further processing.",
+                "The file '{}' has been tokenized and prepared for training.",
                 VERDICT_FILENAME
             );
         }
@@ -1400,6 +1676,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
             detailed,
         } => {
             handle_tokenize(text, file_path, tokenizer, detailed).await?;
+        }
+        Commands::SlidingWindow {
+            file_path,
+            context_size,
+            start_pos,
+            max_windows,
+            show_decoded,
+        } => {
+            handle_sliding_window(file_path, context_size, start_pos, max_windows, show_decoded).await?;
         }
     }
 
