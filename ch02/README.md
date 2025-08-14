@@ -5,6 +5,7 @@ This chapter implements text data acquisition and preparation for language model
 ## Overview
 
 This implementation provides tools for:
+
 - Downloading and managing text corpora
 - Analyzing text characteristics
 - Multiple tokenization approaches
@@ -34,7 +35,8 @@ cargo run -p ch02 -- demo
 ```
 
 This runs through all 12 steps from the book:
-1. Downloads "the-verdict.txt" 
+
+1. Downloads "the-verdict.txt"
 2. Analyzes character, line, and word counts
 3. Demonstrates text splitting methods
 4. Builds vocabulary from unique tokens
@@ -73,6 +75,7 @@ cargo run -p ch02 -- analyze data/the-verdict.txt --preview-length 200
 ```
 
 Shows:
+
 - Total character count
 - Line count
 - Word count (approximate)
@@ -94,6 +97,7 @@ cargo run -p ch02 -- split --method all --max-display 50
 ```
 
 Options:
+
 - `--file-path`: Custom text file (default: the-verdict.txt)
 - `--method`: Splitting method (ws/punct/all)
 - `--max-display`: Number of tokens to show
@@ -117,6 +121,7 @@ cargo run -p ch02 -- tokenize --tokenizer v2 --text "Unknown word: xyz123"
 ```
 
 Options:
+
 - `--tokenizer`: v1/v2/tiktoken
 - `--text`: Direct text input
 - `--file-path`: Tokenize file contents
@@ -139,6 +144,7 @@ cargo run -p ch02 -- sliding-window \
 ```
 
 Options:
+
 - `--context-size`: Window size (default: 4)
 - `--start-pos`: Starting position (default: 50)
 - `--max-windows`: Windows to display (default: 10)
@@ -163,6 +169,7 @@ cargo run -p ch02 -- dataset \
 ```
 
 Options:
+
 - `--max-length`: Sequence length per sample (default: 4)
 - `--stride`: Tokens between samples (default: 1)
 - `--num-samples`: Samples to display (0 for all)
@@ -301,17 +308,21 @@ cargo test -p ch02 -- --nocapture
 ## Common Issues
 
 ### File Not Found
+
 The demo command will automatically download the-verdict.txt if not present. For other commands, ensure the file exists or specify `--file-path`.
 
 ### Unknown Token Error
+
 SimpleTokenizerV1 will error on unknown words. Use V2 or tiktoken for handling arbitrary text.
 
 ### Memory Usage
+
 For very large files, the dataset command with small stride values can use significant memory. Increase stride to reduce memory usage.
 
 ## Next Steps
 
 After completing this chapter, you understand:
+
 - How to prepare text data for language models
 - Different tokenization strategies and trade-offs
 - How training data is structured as context-target pairs

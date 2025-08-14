@@ -100,7 +100,8 @@ Key dependencies:
 - `reqwest` v0.12.22 - HTTP client
 - `futures-util` v0.3 - Stream utilities
 
-## Working with LESSONS Files
+- Rust CLI information can be found at: @llm-docs\rust\rust-cli-guide.md
+- Rust Cargo information can be found at: @llm-docs\rust\cargo.md
 
 **CRITICAL**: These files serve completely different audiences and purposes. They must maintain strict separation of concerns.
 
@@ -112,6 +113,7 @@ Key dependencies:
 ### LESSONS-LLM.md - Machine Learning Concepts Only
 
 #### Purpose
+
 Documents the machine learning and LLM theory being implemented. This file teaches ML concepts, NOT programming.
 
 #### Content Requirements
@@ -125,11 +127,13 @@ Documents the machine learning and LLM theory being implemented. This file teach
 7. **Implementation Notes** - Brief mention that concepts are implemented in Rust (1-2 sentences max)
 
 #### Code Examples
+
 - **Use Rust syntax** since that's our implementation language
 - **Focus on WHAT the code does** (ML perspective), not HOW Rust works
 - **No Rust idiom explanations** - don't explain ownership, borrowing, traits, etc.
 
 #### Strictly FORBIDDEN in LESSONS-LLM.md
+
 - ❌ Rust language tutorials or explanations
 - ❌ Command-line usage instructions (belongs in README)
 - ❌ Rust error handling patterns
@@ -138,10 +142,11 @@ Documents the machine learning and LLM theory being implemented. This file teach
 - ❌ Comparing Rust to other languages
 
 #### Good Example
+
 ```markdown
 ## Tokenization
 
-Tokenization converts text into numerical representations. Byte-Pair Encoding (BPE) 
+Tokenization converts text into numerical representations. Byte-Pair Encoding (BPE)
 builds a vocabulary through iterative merging of frequent character pairs.
 
 \```rust
@@ -150,13 +155,14 @@ let most_frequent = find_most_frequent_pair(&tokens);
 tokens = merge_pair(tokens, most_frequent);
 \```
 
-This process continues until reaching the target vocabulary size, balancing 
+This process continues until reaching the target vocabulary size, balancing
 between character-level and word-level representations.
 ```
 
 ### LESSONS-RS.md - Rust Programming Patterns Only
 
 #### Purpose
+
 Documents Rust programming patterns, idioms, and techniques. This file teaches Rust, using the LLM project as a vehicle for learning.
 
 #### Content Requirements
@@ -170,11 +176,13 @@ Documents Rust programming patterns, idioms, and techniques. This file teaches R
 7. **Exercises** - Rust-focused coding challenges
 
 #### Code Examples
+
 - **Focus on HOW Rust works**, not what the ML algorithm does
 - **Explain Rust-specific patterns** - ownership, traits, generics, etc.
 - **Show alternative implementations** to teach different Rust approaches
 
 #### Strictly FORBIDDEN in LESSONS-RS.md
+
 - ❌ ML/LLM theory or algorithms
 - ❌ Tokenization explanations
 - ❌ Neural network architecture
@@ -183,6 +191,7 @@ Documents Rust programming patterns, idioms, and techniques. This file teaches R
 - ❌ References to "GPT", "transformer", "attention" etc. except in passing
 
 #### Good Example
+
 ```markdown
 ## Working with External Crates
 
@@ -211,6 +220,7 @@ a common requirement when adapting external APIs.
 ### Quick Test for Correct Placement
 
 Ask yourself:
+
 - Is this about **ML/AI theory**? → LESSONS-LLM.md
 - Is this about **Rust programming**? → LESSONS-RS.md
 - Is this about **how to run the code**? → README.md
@@ -242,11 +252,22 @@ Ask yourself:
 5. Update README.md with chapter description
 6. Test thoroughly with various inputs
 
-## Documentation References
+## Available Chapters
 
-- Rust CLI information can be found at: @docs\refs\rust\rust-cli-guide.md
-- Rust Cargo information can be found at: @docs\refs\rust\cargo.md
+### Chapter 2: Working with Text Data (`ch02`)
 
-## Rust Best Practices
+Implements data acquisition, text preprocessing, tokenization, and dataset preparation.
 
-- Remember to follow Rust best practices documented at: @docs\refs\rust\rust-best-practices.md
+**Key features:**
+
+- Multiple tokenization approaches (word-level V1/V2, BPE with tiktoken)
+- Sliding window dataset creation for training data
+- Token visualization with colored output
+- Side-by-side tokenizer comparison
+- Text corpus downloading with streaming
+
+### BPE Chapter: Byte-Pair Encoding (`bpe`)
+
+Focuses on understanding and implementing the BPE algorithm from scratch.
+
+**Status:** In development
