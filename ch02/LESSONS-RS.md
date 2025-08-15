@@ -1003,3 +1003,264 @@ println!("{}", "```".dimmed());
 This helps users understand both the implementation and its equivalent in other languages.
 
 These patterns demonstrate real-world Rust development: adapting external crates, managing ownership, creating clean APIs while maintaining type safety and performance, and gracefully handling dependency issues.
+
+### 22. **Porting PyTorch to Burn: Understanding the Complexity**
+
+When porting PyTorch code to Burn/Rust, the implementation appears more complex for fundamental reasons:
+
+#### Static vs Dynamic Typing
+
+**PyTorch (Python):**
+```python
+# Dynamic typing - no type declarations needed
+torch.tensor(input_chunk)  # Automatically infers type
+self.input_ids = []  # List can hold any type
+```
+
+**Burn (Rust):**
+```rust
+// Must explicitly declare all types
+Vec<Tensor<Backend, 1, Int>>  // Backend, dimensions, element type
+let device = Default::default();  // Explicit device management
+Tensor::<Backend, 1, Int>::from_data(
+    TensorData::from(input_chunk_i64.as_slice()),
+    &device
+)
+```
+
+#### Memory Management Differences
+
+**PyTorch:**
+- Garbage collection handles memory automatically
+- No ownership concerns
+- Free reference passing
+
+**Rust/Burn:**
+- Ownership system requires explicit `clone()` calls
+- Must consider borrowing vs moving
+- Device management is explicit
+
+#### Error Handling Philosophy
+
+**PyTorch:**
+```python
+tokenizer.encode(txt)  # Crashes on error
+```
+
+**Rust/Burn:**
+```rust
+tokenizer.encode_with_special_tokens(text)  // Returns Result
+    .map_err(|e| format!("Encoding failed: {}", e))?  // Explicit handling
+```
+
+#### Backend Abstraction
+
+**PyTorch:**
+```python
+torch.tensor(data)  # Backend handled implicitly
+```
+
+**Rust/Burn:**
+```rust
+type Backend = NdArray;  // Must specify backend
+let device = Default::default();  // Explicit device
+Tensor::<Backend, 1, Int>::from_data(data, &device)
+```
+
+This allows compile-time backend selection (CPU, CUDA, WebGPU) but requires explicit specification.
+
+#### Trait System vs Duck Typing
+
+**PyTorch:**
+```python
+class GPTDatasetV1(Dataset):
+    def __len__(self):  # Magic method
+        return len(self.input_ids)
+    
+    def __getitem__(self, idx):  # Magic method
+        return self.input_ids[idx], self.target_ids[idx]
+```
+
+**Rust/Burn:**
+```rust
+impl Dataset<GPTDatasetItem> for GPTDatasetV1 {
+    fn get(&self, index: usize) -> Option<GPTDatasetItem> {
+        // Must implement trait explicitly
+    }
+    
+    fn len(&self) -> usize {
+        self.input_ids.len()
+    }
+}
+
+// Separate method to avoid name conflicts
+fn get_tensors(&self, idx: usize) -> Option<(Tensor<Backend, 1, Int>, Tensor<Backend, 1, Int>)>
+```
+
+#### Type Conversions
+
+**PyTorch:**
+```python
+# Automatic type conversions
+token_ids = tokenizer.encode(txt)
+torch.tensor(token_ids)  # Works with any numeric type
+```
+
+**Rust/Burn:**
+```rust
+// Explicit conversions required
+let token_ids = tokenizer.encode_with_special_tokens(text);  // Returns Vec<u32>
+let token_ids_i64: Vec<i64> = token_ids.iter()
+    .map(|&x| x as i64)  // Must convert u32 -> i64 for Burn
+    .collect();
+```
+
+#### The Trade-offs
+
+| Python/PyTorch | Rust/Burn |
+|---|---|
+| Simple to write | Memory safe |
+| Runtime errors | Compile-time errors |
+| Slower execution | Faster execution |
+| Implicit device management | Explicit control |
+| Single backend | Multiple backends at compile time |
+| Duck typing | Type safety |
+| ~15 lines of code | ~80 lines (with comments) |
+
+#### Minimal Core Comparison
+
+If we strip away everything except core logic:
+
+**PyTorch (10 lines):**
+```python
+class GPTDatasetV1(Dataset):
+    def __init__(self, txt, tokenizer, max_length, stride):
+        self.input_ids = []
+        self.target_ids = []
+        token_ids = tokenizer.encode(txt)
+        for i in range(0, len(token_ids) - max_length, stride):
+            self.input_ids.append(torch.tensor(token_ids[i:i + max_length]))
+            self.target_ids.append(torch.tensor(token_ids[i + 1: i + max_length + 1]))
+    def __len__(self): return len(self.input_ids)
+    def __getitem__(self, idx): return self.input_ids[idx], self.target_ids[idx]
+```
+
+**Rust/Burn (minimal, without integration):**
+```rust
+struct GPTDatasetV1 {
+    input_ids: Vec<Vec<i64>>,
+    target_ids: Vec<Vec<i64>>,
+}
+
+impl GPTDatasetV1 {
+    fn new(text: &str, max_length: usize, stride: usize) -> Self {
+        let tokenizer = r50k_base().unwrap();
+        let token_ids = tokenizer.encode_with_special_tokens(text);
+        let mut input_ids = Vec::new();
+        let mut target_ids = Vec::new();
+        
+        let mut i = 0;
+        while i + max_length < token_ids.len() {
+            input_ids.push(token_ids[i..i + max_length].iter().map(|&x| x as i64).collect());
+            target_ids.push(token_ids[i + 1..i + max_length + 1].iter().map(|&x| x as i64).collect());
+            i += stride;
+        }
+        
+        GPTDatasetV1 { input_ids, target_ids }
+    }
+}
+```
+
+The Rust version is longer even in minimal form due to:
+- Type declarations
+- Explicit conversions
+- Ownership rules
+- No magic methods
+
+#### When the Complexity Pays Off
+
+The additional complexity brings benefits:
+
+1. **Compile-time guarantees**: Many errors caught before runtime
+2. **Performance**: No GC pauses, zero-cost abstractions
+3. **Memory safety**: No data races, use-after-free, or null pointers
+4. **Backend flexibility**: Switch between CPU/GPU at compile time
+5. **Deployment**: Single binary, no Python runtime needed
+
+#### Practical Advice for Porting
+
+When porting PyTorch to Burn:
+
+1. **Start simple**: Use vectors before tensors
+2. **Add types gradually**: Begin with basic types, refine later
+3. **Test incrementally**: Port small pieces and verify
+4. **Embrace the compiler**: Let it guide you to correct code
+5. **Don't fight the ownership system**: Clone when needed initially, optimize later
+
+The complexity is front-loaded: harder to write initially, but safer and faster in production.
+
+### 23. **Understanding Burn's DataLoader Architecture**
+
+When working with Burn's DataLoader, be aware of its trait-based design:
+
+#### The DataLoader Trait
+
+```rust
+// DataLoaderBuilder::build() returns this:
+Arc<dyn DataLoader<Backend, Batch>>
+
+// NOT this:
+impl Iterator<Item = Batch>
+```
+
+The `DataLoader` trait provides an `iter()` method to get the actual iterator:
+
+```rust
+// Correct usage:
+let dataloader = DataLoaderBuilder::new(batcher)
+    .batch_size(32)
+    .build(dataset);  // Returns Arc<dyn DataLoader>
+
+// Iterate using the iter() method:
+for batch in dataloader.iter() {
+    // Process batch
+}
+```
+
+#### Common Pitfall
+
+```rust
+// ❌ Wrong - DataLoader is not itself an iterator
+fn create_dataloader() -> impl Iterator<Item = Batch> {
+    builder.build(dataset)  // Error: Arc<dyn DataLoader> is not Iterator
+}
+
+// ✅ Correct - Return the DataLoader, call iter() when needed
+fn create_dataloader() -> Arc<dyn DataLoader<Backend, Batch>> {
+    builder.build(dataset)
+}
+```
+
+#### Why This Design?
+
+1. **Reusability**: DataLoader can be iterated multiple times (epochs)
+2. **State Management**: Can track iteration state between epochs
+3. **Device Transfer**: Can move entire dataloader to different devices
+4. **Slicing**: Can create subsets of the dataloader
+
+This is different from PyTorch where DataLoader directly implements `__iter__`:
+
+```python
+# PyTorch - DataLoader is directly iterable
+for batch in dataloader:
+    pass
+
+# Rust/Burn - Must call iter()
+for batch in dataloader.iter() {
+    // Process
+}
+```
+
+#### Key Takeaway
+
+Always check the return types of builder methods in Rust libraries. Unlike Python where everything "just works" through duck typing, Rust requires explicit understanding of the types being returned. When in doubt, check the documentation or use IDE type hints to understand what you're working with.

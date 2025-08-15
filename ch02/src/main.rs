@@ -21,6 +21,9 @@ use std::path::{Path, PathBuf}; // Types imported directly
 use std::sync::Arc; // For efficient immutable data sharing
 
 // External crate imports (alphabetically sorted)
+use burn::data::dataset::Dataset;
+use burn::tensor::{Tensor, Int, TensorData};
+use burn_ndarray::NdArray;
 use clap::{Parser, Subcommand}; // Derive macro traits
 use colored::*; // Colors for terminal output
 use futures_util::StreamExt; // Trait needed for .next() on streams
@@ -436,6 +439,51 @@ enum Commands {
         #[arg(short = 'v', long)]
         verbose: bool,
     },
+    /// Demonstrate DataLoader for batch processing
+    Dataloader {
+        /// Path to text file (defaults to the-verdict.txt if not provided)
+        #[arg(short, long)]
+        file_path: Option<String>,
+
+        /// Batch size for DataLoader
+        #[arg(short, long, default_value = "4")]
+        batch_size: usize,
+
+        /// Maximum sequence length for each sample
+        #[arg(short, long, default_value = "8")]
+        max_length: usize,
+
+        /// Stride for sliding window
+        #[arg(short, long, default_value = "4")]
+        stride: usize,
+
+        /// Random seed for shuffling (omit for no shuffle)
+        #[arg(long)]
+        shuffle_seed: Option<u64>,
+
+        /// Number of batches to display
+        #[arg(short = 'n', long, default_value = "3")]
+        num_batches: usize,
+
+        /// Show decoded text for batches
+        #[arg(short = 'd', long)]
+        show_decoded: bool,
+    },
+}
+
+/// Backend type for our tensors
+type Backend = NdArray;
+
+/// Dataset item containing input-target pairs
+/// 
+/// This struct is used when implementing Burn's Dataset trait.
+/// In a real training scenario, a Batcher would consume these items
+/// and convert them to tensors for batch processing.
+#[allow(dead_code)]  // Used by Dataset trait implementation
+#[derive(Clone, Debug)]
+struct GPTDatasetItem {
+    pub input_ids: Vec<i64>,  // Changed to i64 for Burn tensor compatibility
+    pub target_ids: Vec<i64>,
 }
 
 /// GPT Dataset for creating input-target pairs for training
@@ -445,16 +493,112 @@ enum Commands {
 /// - Input: A sequence of tokens [t0, t1, ..., tn-1]
 /// - Target: The next tokens [t1, t2, ..., tn]
 ///
-/// This is the Rust equivalent of PyTorch's Dataset class.
-/// In a real training scenario with Burn, these would be tensors.
+/// ## PyTorch vs Rust/Burn Implementation
+///
+/// The PyTorch version is deceptively simple:
+/// ```python
+/// class GPTDatasetV1(Dataset):
+///     def __init__(self, txt, tokenizer, max_length, stride):
+///         self.input_ids = []
+///         self.target_ids = []
+///         token_ids = tokenizer.encode(txt)
+///         for i in range(0, len(token_ids) - max_length, stride):
+///             input_chunk = token_ids[i:i + max_length]
+///             target_chunk = token_ids[i + 1: i + max_length + 1]
+///             self.input_ids.append(torch.tensor(input_chunk))
+///             self.target_ids.append(torch.tensor(target_chunk))
+/// ```
+///
+/// The Rust/Burn version requires more explicit type handling due to:
+///
+/// ### 1. Library API Mismatch
+/// - **tiktoken-rs** returns `Vec<u32>` for token IDs (inherited from C++)
+/// - **Burn** expects `i64` for Int tensors (their design choice)
+/// - **No bridge exists** between these two choices
+///
+/// ### 2. Rust's Type System
+/// - **No implicit conversions**: Can't automatically convert u32 → i64
+/// - **Ownership rules**: Slices are borrowed, tensors need owned data
+/// - **Explicit everything**: Every conversion must be written out
+///
+/// ### 3. What Python Hides
+/// In Python, `torch.tensor(token_ids[i:i+max_length])` does secretly:
+/// 1. Slice the list (Python list, not numpy array)
+/// 2. Infer the dtype (probably int64)
+/// 3. Copy data to tensor storage
+/// 4. Handle device placement
+///
+/// In Rust, we must do each step explicitly:
+/// 1. Slice the Vec (`&token_ids[i..j]`) → gives `&[u32]`
+/// 2. Convert each u32 to i64 (`.map(|&x| x as i64)`)
+/// 3. Collect into owned Vec (`.collect::<Vec<_>>()`)
+/// 4. Wrap in TensorData (`TensorData::from(...)`)
+/// 5. Create tensor with device (`Tensor::from_data(..., &device)`)
+///
+/// This verbosity is the price of:
+/// - Memory safety without GC
+/// - Zero-cost abstractions
+/// - Compile-time correctness
+/// - Explicit resource management
 struct GPTDatasetV1 {
-    /// Input token sequences stored as vectors (u32 for tiktoken compatibility)
-    input_ids: Vec<Vec<u32>>,
-    /// Target token sequences stored as vectors (u32 for tiktoken compatibility)
-    target_ids: Vec<Vec<u32>>,
+    /// Input token sequences stored as tensors
+    input_ids: Vec<Tensor<Backend, 1, Int>>,
+    /// Target token sequences stored as tensors
+    target_ids: Vec<Tensor<Backend, 1, Int>>,
 }
 
 impl GPTDatasetV1 {
+    /// Helper function to create a tensor from a slice of u32 tokens
+    /// 
+    /// ## Why This Function Exists (The Type Conversion Problem)
+    /// 
+    /// We're caught between two incompatible library APIs:
+    /// 1. **tiktoken returns `Vec<u32>`** - Their design choice for token IDs
+    /// 2. **Burn expects `i64` for Int tensors** - Their design choice for integers
+    /// 
+    /// Additionally, Rust's ownership rules create friction:
+    /// - Slicing gives us `&[u32]` (borrowed data)
+    /// - TensorData::from needs owned data or specific types
+    /// - No automatic u32 → i64 conversion in Rust (unlike Python)
+    /// 
+    /// ## What This Function Does
+    /// 
+    /// Takes a slice like `&token_ids[5..10]` and:
+    /// 1. Iterates over each u32 token
+    /// 2. Converts each to i64 (required by Burn)
+    /// 3. Collects into a Vec<i64> (owned data)
+    /// 4. Creates TensorData from the Vec
+    /// 5. Wraps in a Tensor with device info
+    /// 
+    /// ## Why We Can't Simplify Further
+    /// 
+    /// In Python/PyTorch this would just be:
+    /// ```python
+    /// torch.tensor(token_ids[i:i+max_length])
+    /// ```
+    /// 
+    /// But Rust makes all conversions explicit. We can't avoid this because:
+    /// - Burn doesn't have `impl From<&[u32]> for TensorData<Int>`
+    /// - tiktoken can't return i64 (it's a C++ library wrapper)
+    /// - Rust won't implicitly convert numeric types
+    /// 
+    /// This is the trade-off: explicit and safe vs implicit and convenient.
+    #[inline]
+    fn slice_to_tensor(tokens: &[u32], device: &<Backend as burn::tensor::backend::Backend>::Device) -> Tensor<Backend, 1, Int> {
+        // This chain of operations is necessary because:
+        // 1. tokens is &[u32] (borrowed slice from tiktoken)
+        // 2. We need Vec<i64> for TensorData (Burn requirement)
+        // 3. The .map() converts each u32 to i64
+        // 4. .collect::<Vec<_>>() creates owned Vec<i64>
+        // 5. .as_slice() gives &[i64] for TensorData::from
+        Tensor::<Backend, 1, Int>::from_data(
+            TensorData::from(
+                tokens.iter().map(|&x| x as i64).collect::<Vec<_>>().as_slice()
+            ),
+            device
+        )
+    }
+
     /// Create a new GPT dataset from text
     ///
     /// # Arguments
@@ -463,8 +607,11 @@ impl GPTDatasetV1 {
     /// * `stride` - How many tokens to move forward between samples
     ///
     /// # Returns
-    /// A new GPTDatasetV1 instance with input-target pairs
+    /// A new GPTDatasetV1 instance with input-target pairs as Burn tensors
     fn new(text: &str, max_length: usize, stride: usize) -> Self {
+        // Initialize device for tensor creation
+        let device = Default::default();
+        
         // Use tiktoken (GPT-2 tokenizer) for encoding
         let tokenizer = r50k_base().unwrap();
         let token_ids = tokenizer.encode_with_special_tokens(text);
@@ -473,15 +620,22 @@ impl GPTDatasetV1 {
         let mut target_ids = Vec::new();
         
         // Create overlapping sequences with the specified stride
+        // Following PyTorch: for i in range(0, len(token_ids) - max_length, stride)
         let mut i = 0;
         while i + max_length < token_ids.len() {
-            // Input chunk: tokens from i to i+max_length
-            let input_chunk = token_ids[i..i + max_length].to_vec();
-            // Target chunk: tokens from i+1 to i+max_length+1 (shifted by 1)
-            let target_chunk = token_ids[i + 1..i + max_length + 1].to_vec();
-            
-            input_ids.push(input_chunk);
-            target_ids.push(target_chunk);
+            // In PyTorch, this is simply:
+            //   self.input_ids.append(torch.tensor(token_ids[i:i + max_length]))
+            //   self.target_ids.append(torch.tensor(token_ids[i + 1: i + max_length + 1]))
+            //
+            // But in Rust/Burn we need explicit type conversions because:
+            // - token_ids is Vec<u32> from tiktoken (C++ library choice)
+            // - Burn tensors need i64 for Int type (Burn's design choice)
+            // - Rust has no implicit numeric conversions (safety feature)
+            //
+            // The slice_to_tensor helper handles all the necessary conversions:
+            // &[u32] → Iterator → map to i64 → Vec<i64> → TensorData → Tensor
+            input_ids.push(Self::slice_to_tensor(&token_ids[i..i + max_length], &device));
+            target_ids.push(Self::slice_to_tensor(&token_ids[i + 1..i + max_length + 1], &device));
             
             i += stride;
         }
@@ -493,23 +647,198 @@ impl GPTDatasetV1 {
     }
     
     /// Get the number of samples in the dataset
+    /// 
+    /// Equivalent to PyTorch's __len__ method
     fn len(&self) -> usize {
         self.input_ids.len()
     }
     
     /// Get a sample at the specified index
     ///
+    /// Equivalent to PyTorch's __getitem__ method.
+    /// Returns a tuple of (input_tensor, target_tensor) just like PyTorch.
+    ///
     /// # Arguments
     /// * `idx` - The index of the sample to retrieve
     ///
     /// # Returns
-    /// A tuple of (input_ids, target_ids) or None if index is out of bounds
-    fn get(&self, idx: usize) -> Option<(Vec<u32>, Vec<u32>)> {
+    /// A tuple of (input_tensor, target_tensor) or None if index is out of bounds
+    fn get_tensors(&self, idx: usize) -> Option<(Tensor<Backend, 1, Int>, Tensor<Backend, 1, Int>)> {
         if idx >= self.len() {
             return None;
         }
         Some((self.input_ids[idx].clone(), self.target_ids[idx].clone()))
     }
+}
+
+/// Implement the Burn Dataset trait for GPTDatasetV1
+impl Dataset<GPTDatasetItem> for GPTDatasetV1 {
+    fn get(&self, index: usize) -> Option<GPTDatasetItem> {
+        if let Some((input_tensor, target_tensor)) = self.get_tensors(index) {
+            // Convert tensors back to Vec<i64> for the dataset item
+            // In a real training scenario, a Batcher would handle the tensor conversion
+            let input_data = input_tensor.to_data();
+            let target_data = target_tensor.to_data();
+            
+            let input_ids = input_data.to_vec::<i64>().unwrap();
+            let target_ids = target_data.to_vec::<i64>().unwrap();
+            
+            Some(GPTDatasetItem {
+                input_ids,
+                target_ids,
+            })
+        } else {
+            None
+        }
+    }
+    
+    fn len(&self) -> usize {
+        self.input_ids.len()
+    }
+}
+
+/// Batch structure for GPT training
+/// 
+/// This holds a batch of input and target tensors for training.
+/// Similar to what PyTorch's DataLoader returns.
+#[derive(Clone, Debug)]
+struct GPTBatch<B: burn::tensor::backend::Backend> {
+    pub inputs: Tensor<B, 2, Int>,   // Shape: [batch_size, seq_len]
+    pub targets: Tensor<B, 2, Int>,  // Shape: [batch_size, seq_len]
+}
+
+/// Batcher for converting GPTDatasetItems into tensor batches
+/// 
+/// This is the Burn equivalent of PyTorch's collate_fn.
+/// It takes individual dataset items and combines them into batches.
+#[derive(Clone)]
+struct GPTBatcher<B: burn::tensor::backend::Backend> {
+    device: B::Device,
+}
+
+impl<B: burn::tensor::backend::Backend> GPTBatcher<B> {
+    fn new(device: B::Device) -> Self {
+        Self { device }
+    }
+}
+
+use burn::data::dataloader::batcher::Batcher;
+// DataLoader is built through DataLoaderBuilder
+
+impl<B: burn::tensor::backend::Backend> Batcher<B, GPTDatasetItem, GPTBatch<B>> for GPTBatcher<B> {
+    fn batch(&self, items: Vec<GPTDatasetItem>, _device: &B::Device) -> GPTBatch<B> {
+        let batch_size = items.len();
+        
+        // Get sequence length from first item (assumes all are same length)
+        let seq_len = items[0].input_ids.len();
+        
+        // Flatten all inputs and targets into single vectors
+        let mut all_inputs = Vec::with_capacity(batch_size * seq_len);
+        let mut all_targets = Vec::with_capacity(batch_size * seq_len);
+        
+        for item in items {
+            all_inputs.extend(item.input_ids);
+            all_targets.extend(item.target_ids);
+        }
+        
+        // Create 2D tensors with shape [batch_size, seq_len]
+        let inputs = Tensor::<B, 1, Int>::from_data(
+            TensorData::from(all_inputs.as_slice()),
+            &self.device
+        ).reshape([batch_size, seq_len]);
+        
+        let targets = Tensor::<B, 1, Int>::from_data(
+            TensorData::from(all_targets.as_slice()),
+            &self.device
+        ).reshape([batch_size, seq_len]);
+        
+        GPTBatch { inputs, targets }
+    }
+}
+
+/// Create a DataLoader for GPT training
+/// 
+/// This is the Rust/Burn equivalent of the Python function:
+/// ```python
+/// def create_dataloader_v1(txt, batch_size=4, max_length=256,
+///                          stride=128, shuffle=True, drop_last=True,
+///                          num_workers=0):
+///     tokenizer = tiktoken.get_encoding("gpt2")
+///     dataset = GPTDatasetV1(txt, tokenizer, max_length, stride)
+///     dataloader = DataLoader(
+///         dataset,
+///         batch_size=batch_size,
+///         shuffle=shuffle,
+///         drop_last=drop_last,
+///         num_workers=num_workers
+///     )
+///     return dataloader
+/// ```
+/// 
+/// ## Key Differences from PyTorch:
+/// 
+/// 1. **Tokenizer**: We use "r50k_base" (GPT-2) from tiktoken-rs
+/// 2. **Shuffle**: Requires a seed in Burn (for reproducibility)
+/// 3. **num_workers**: Handled differently in Burn (set via builder)
+/// 4. **drop_last**: Available in Burn's DataLoaderBuilder
+/// 5. **Return type**: Returns the built DataLoader directly
+/// 
+/// ## Usage Example:
+/// ```rust
+/// let dataloader = create_dataloader_v1(
+///     text,
+///     4,      // batch_size
+///     256,    // max_length
+///     128,    // stride
+///     Some(42), // shuffle with seed
+///     true,   // drop_last
+/// )?;
+/// 
+/// for batch in dataloader.iter() {
+///     // Training loop
+///     let outputs = model.forward(batch.inputs);
+///     let loss = loss_fn(outputs, batch.targets);
+///     // ... backprop and optimization
+/// }
+/// ```
+fn create_dataloader_v1(
+    txt: &str,
+    batch_size: usize,
+    max_length: usize,
+    stride: usize,
+    shuffle_seed: Option<u64>,  // None for no shuffle, Some(seed) for reproducible shuffle
+    drop_last: bool,
+) -> Arc<dyn burn::data::dataloader::DataLoader<NdArray, GPTBatch<NdArray>>> {
+    use burn::data::dataloader::DataLoaderBuilder;
+    
+    // Create the dataset (using r50k_base which is GPT-2 tokenizer)
+    let dataset = GPTDatasetV1::new(txt, max_length, stride);
+    
+    // Create the batcher
+    let device = Default::default();
+    let batcher = GPTBatcher::<NdArray>::new(device);
+    
+    // Build the dataloader with explicit Backend type
+    let mut builder = DataLoaderBuilder::new(batcher)
+        .batch_size(batch_size);
+    
+    // Add shuffle if requested (requires seed for reproducibility)
+    if let Some(seed) = shuffle_seed {
+        builder = builder.shuffle(seed);
+    }
+    
+    // Note: drop_last is not directly available in Burn's DataLoaderBuilder
+    // This would need to be handled differently or via a custom implementation
+    // For now, we'll note this limitation
+    if drop_last {
+        // TODO: Implement drop_last functionality
+        // Burn doesn't have built-in drop_last, would need custom implementation
+    }
+    
+    // Note: num_workers is set differently in Burn (via builder.num_workers())
+    // Default is usually appropriate for CPU-based datasets
+    
+    builder.build(dataset)
 }
 
 /// Downloads a file from a URL with progress reporting.
@@ -1156,19 +1485,29 @@ async fn handle_dataset(
     };
     
     for i in 0..samples_to_show {
-        if let Some((input_ids, target_ids)) = dataset.get(i) {
+        if let Some((input_tensor, target_tensor)) = dataset.get_tensors(i) {
             println!("\n{} {}", "Sample".cyan(), format!("{}", i).yellow());
             
+            // Convert tensors to vectors for display
+            let input_data = input_tensor.to_data();
+            let target_data = target_tensor.to_data();
+            let input_ids_vec = input_data.to_vec::<i64>().unwrap();
+            let target_ids_vec = target_data.to_vec::<i64>().unwrap();
+            
             // Show raw token IDs
-            println!("  {}: {:?}", "Input IDs".green(), input_ids);
-            println!("  {}: {:?}", "Target IDs".red(), target_ids);
+            println!("  {}: {:?}", "Input IDs".green(), input_ids_vec);
+            println!("  {}: {:?}", "Target IDs".red(), target_ids_vec);
             
             // Show decoded text if requested
             if show_decoded {
                 let tokenizer = r50k_base().unwrap();
                 
-                let input_text = tokenizer.decode(input_ids.clone()).unwrap();
-                let target_text = tokenizer.decode(target_ids.clone()).unwrap();
+                // Convert back to u32 for tiktoken
+                let input_ids_u32: Vec<u32> = input_ids_vec.iter().map(|&x| x as u32).collect();
+                let target_ids_u32: Vec<u32> = target_ids_vec.iter().map(|&x| x as u32).collect();
+                
+                let input_text = tokenizer.decode(input_ids_u32).unwrap();
+                let target_text = tokenizer.decode(target_ids_u32).unwrap();
                 
                 println!("  {} {:?}", "Input Text:".green(), input_text);
                 println!("  {} {:?}", "Target Text:".red(), target_text);
@@ -1205,6 +1544,173 @@ async fn handle_dataset(
     println!("            target_chunk = token_ids[i + 1: i + max_length + 1]");
     println!("            self.input_ids.append(torch.tensor(input_chunk))");
     println!("            self.target_ids.append(torch.tensor(target_chunk))");
+    println!("{}", "```".dimmed());
+    
+    Ok(())
+}
+
+/// Handles the dataloader subcommand, demonstrating batch processing with DataLoader.
+///
+/// # Arguments
+///
+/// * `file_path` - Optional file path to read text from
+/// * `batch_size` - Number of samples per batch
+/// * `max_length` - Maximum sequence length for each sample
+/// * `stride` - How many tokens to move forward between samples
+/// * `shuffle_seed` - Optional seed for shuffling
+/// * `num_batches` - Number of batches to display
+/// * `show_decoded` - Whether to show decoded text
+async fn handle_dataloader(
+    file_path: Option<String>,
+    batch_size: usize,
+    max_length: usize,
+    stride: usize,
+    shuffle_seed: Option<u64>,
+    num_batches: usize,
+    show_decoded: bool,
+) -> Result<(), Box<dyn Error>> {
+    // Determine the file path to use
+    let path = file_path.unwrap_or_else(|| VERDICT_FILENAME.to_string());
+    
+    // Check if file exists, download if necessary
+    if !Path::new(&path).exists() {
+        println!("File not found. Downloading from: {}", VERDICT_URL);
+        download_file(VERDICT_URL, Some(&path)).await?;
+    }
+    
+    // Read the text
+    println!("Loading text from: {}", path);
+    let text = fs::read_to_string(&path).await?;
+    println!("Text length: {} characters", text.len());
+    
+    // Create the dataloader
+    println!("\n{}", "Creating DataLoader...".bold());
+    println!("Parameters:");
+    println!("  batch_size: {}", batch_size);
+    println!("  max_length: {}", max_length);
+    println!("  stride: {}", stride);
+    println!("  shuffle: {}", if shuffle_seed.is_some() { "Yes" } else { "No" });
+    
+    let dataloader = create_dataloader_v1(
+        &text,
+        batch_size,
+        max_length,
+        stride,
+        shuffle_seed,
+        false,  // drop_last not fully implemented yet
+    );
+    
+    // Get dataset info
+    let dataset = GPTDatasetV1::new(&text, max_length, stride);
+    let total_samples = dataset.len();
+    let total_batches = (total_samples + batch_size - 1) / batch_size;  // Ceiling division
+    
+    println!("\n{}", "DataLoader Statistics:".bold());
+    println!("  Total samples: {}", total_samples);
+    println!("  Total batches: {}", total_batches);
+    println!("  Samples per batch: {}", batch_size);
+    println!("  Token shape per sample: [{}]", max_length);
+    println!("  Batch tensor shape: [{}, {}]", batch_size, max_length);
+    
+    // Display sample batches
+    println!("\n{}", "Sample Batches:".bold());
+    let batches_to_show = min(num_batches, total_batches);
+    
+    // Note: Burn's DataLoader has an iter() method to get an iterator
+    // We iterate over the batches
+    let mut batch_count = 0;
+    for batch_data in dataloader.iter() {
+        if batch_count >= batches_to_show {
+            break;
+        }
+        
+        println!("\n{} {}", "Batch".cyan(), format!("{}", batch_count).yellow());
+        
+        // Show batch shapes and sample data
+        let batch_inputs = &batch_data.inputs;
+        let batch_targets = &batch_data.targets;
+        
+        // Get dimensions
+        let dims = batch_inputs.dims();
+        println!("  Batch shape: {:?}", dims);
+        
+        // Show first few sequences in the batch
+        // Show full batch tensor (like PyTorch would)
+        println!("  {}:", "Inputs (full batch tensor)".green());
+        let input_data = batch_inputs.to_data();
+        let input_values = input_data.to_vec::<i64>().unwrap();
+        
+        // Display as 2D array with proper formatting
+        let actual_batch_size = dims[0];
+        let seq_len = dims[1];
+        for i in 0..actual_batch_size {
+            let start = i * seq_len;
+            let end = start + seq_len;
+            let row = &input_values[start..end];
+            println!("    [{}]: {:?}", i, row);
+        }
+        
+        println!("\n  {}:", "Targets (full batch tensor)".red());
+        let target_data = batch_targets.to_data();
+        let target_values = target_data.to_vec::<i64>().unwrap();
+        for i in 0..actual_batch_size {
+            let start = i * seq_len;
+            let end = start + seq_len;
+            let row = &target_values[start..end];
+            println!("    [{}]: {:?}", i, row);
+        }
+        
+        if show_decoded {
+            println!("\n  {}:", "Decoded text (first sequence)".cyan());
+            let tokenizer = r50k_base().unwrap();
+            
+            // Show decoded text for first sequence only (for brevity)
+            let first_input = &input_values[0..seq_len];
+            let first_target = &target_values[0..seq_len];
+            
+            // Convert back to u32 for tiktoken
+            let input_u32: Vec<u32> = first_input.iter().map(|&x| x as u32).collect();
+            let target_u32: Vec<u32> = first_target.iter().map(|&x| x as u32).collect();
+            
+            let input_text = tokenizer.decode(input_u32).unwrap();
+            let target_text = tokenizer.decode(target_u32).unwrap();
+            
+            println!("    {} {:?}", "Input:".green(), input_text);
+            println!("    {} {:?}", "Target:".red(), target_text);
+        }
+        
+        batch_count += 1;
+    }
+    
+    if batches_to_show < total_batches {
+        println!("\n(Showing {} batches out of {} total)", batches_to_show, total_batches);
+    }
+    
+    // Show Python equivalent
+    println!("\n{}", "Python Equivalent:".bold());
+    println!("{}", "```python".dimmed());
+    println!("from torch.utils.data import DataLoader");
+    println!("import tiktoken");
+    println!();
+    println!("def create_dataloader_v1(txt, batch_size={}, max_length={},", batch_size, max_length);
+    println!("                         stride={}, shuffle={}, drop_last=True,", stride, shuffle_seed.is_some());
+    println!("                         num_workers=0):");
+    println!("    tokenizer = tiktoken.get_encoding(\"gpt2\")");
+    println!("    dataset = GPTDatasetV1(txt, tokenizer, max_length, stride)");
+    println!("    dataloader = DataLoader(");
+    println!("        dataset,");
+    println!("        batch_size=batch_size,");
+    println!("        shuffle=shuffle,");
+    println!("        drop_last=drop_last,");
+    println!("        num_workers=num_workers");
+    println!("    )");
+    println!("    return dataloader");
+    println!();
+    println!("dataloader = create_dataloader_v1(text)");
+    println!("for batch_idx, (inputs, targets) in enumerate(dataloader):");
+    println!("    print(f\"Batch {{batch_idx}}: inputs shape {{inputs.shape}}, targets shape {{targets.shape}}\")");
+    println!("    if batch_idx >= {}:", num_batches - 1);
+    println!("        break");
     println!("{}", "```".dimmed());
     
     Ok(())
@@ -1897,15 +2403,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // Show first few samples
             println!("First 3 samples:");
             for i in 0..3.min(dataset.len()) {
-                if let Some((input_ids, target_ids)) = dataset.get(i) {
+                if let Some((input_tensor, target_tensor)) = dataset.get_tensors(i) {
                     println!();
                     println!("Sample {}:", i);
-                    println!("  Input IDs:  {:?}", input_ids);
-                    println!("  Target IDs: {:?}", target_ids);
+                    
+                    // Convert tensors to vectors for display
+                    let input_data = input_tensor.to_data();
+                    let target_data = target_tensor.to_data();
+                    let input_ids_vec = input_data.to_vec::<i64>().unwrap();
+                    let target_ids_vec = target_data.to_vec::<i64>().unwrap();
+                    
+                    println!("  Input IDs:  {:?}", input_ids_vec);
+                    println!("  Target IDs: {:?}", target_ids_vec);
+                    
+                    // Convert back to u32 for tiktoken decoding
+                    let input_ids_u32: Vec<u32> = input_ids_vec.iter().map(|&x| x as u32).collect();
+                    let target_ids_u32: Vec<u32> = target_ids_vec.iter().map(|&x| x as u32).collect();
                     
                     // Decode to show text
-                    let input_text = encoding.decode(input_ids).unwrap();
-                    let target_text = encoding.decode(target_ids).unwrap();
+                    let input_text = encoding.decode(input_ids_u32).unwrap();
+                    let target_text = encoding.decode(target_ids_u32).unwrap();
                     
                     println!("  Input:  {:?}", input_text);
                     println!("  Target: {:?}", target_text);
@@ -1965,6 +2482,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
             verbose,
         } => {
             handle_dataset(file_path, max_length, stride, num_samples, show_decoded, verbose).await?;
+        }
+        Commands::Dataloader {
+            file_path,
+            batch_size,
+            max_length,
+            stride,
+            shuffle_seed,
+            num_batches,
+            show_decoded,
+        } => {
+            handle_dataloader(file_path, batch_size, max_length, stride, shuffle_seed, num_batches, show_decoded).await?;
         }
     }
 

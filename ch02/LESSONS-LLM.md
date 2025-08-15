@@ -324,6 +324,210 @@ The quality and diversity of these context-target pairs directly determine model
 7. **Sliding windows create training data** - Every position in text becomes a learning opportunity
 8. **Batch preparation enables efficient training** - GPTDataset organizes data for parallel processing
 
+## DataLoaders: Efficient Batch Processing
+
+### From Dataset to DataLoader
+
+While a Dataset organizes our training data, a DataLoader handles the logistics of feeding this data to the model during training:
+
+```python
+# Dataset provides individual samples
+dataset = GPTDatasetV1(text, tokenizer, max_length=256, stride=128)
+single_sample = dataset[0]  # One input-target pair
+
+# DataLoader provides batches for training
+dataloader = DataLoader(dataset, batch_size=8, shuffle=True)
+batch = next(iter(dataloader))  # 8 input-target pairs as tensors
+```
+
+### Why We Need DataLoaders
+
+#### 1. **Batching for GPU Efficiency**
+
+Modern GPUs process multiple examples in parallel:
+- Single example: Wastes GPU compute capacity
+- Batch of 8-64: Maximizes throughput
+- Too large: May exceed memory
+
+```
+Without batching (sequential):
+Sample 1: [████____] 25% GPU usage
+Sample 2: [████____] 25% GPU usage
+Sample 3: [████____] 25% GPU usage
+
+With batching (parallel):
+Batch of 8: [████████] 100% GPU usage
+```
+
+#### 2. **Shuffling for Better Learning**
+
+Training on sequential data creates problems:
+- Model memorizes order instead of patterns
+- Gradient updates become correlated
+- Poor generalization
+
+DataLoader shuffling ensures:
+- Random sampling across the dataset
+- Different batch compositions each epoch
+- Better gradient estimates
+
+#### 3. **Memory Management**
+
+DataLoaders load data on-demand:
+```
+Dataset: 1GB of tokenized text stored
+DataLoader: Loads only current batch (e.g., 1MB) into GPU memory
+```
+
+This enables training on datasets larger than available RAM.
+
+### Key DataLoader Parameters
+
+```python
+dataloader = DataLoader(
+    dataset,
+    batch_size=32,      # Examples per batch
+    shuffle=True,       # Randomize order
+    drop_last=True,     # Drop incomplete final batch
+    num_workers=4       # Parallel data loading threads
+)
+```
+
+#### batch_size
+- **Small (1-8)**: More gradient updates, slower convergence, less memory
+- **Medium (32-64)**: Good balance for most tasks
+- **Large (128+)**: Faster training, needs more memory, may hurt generalization
+
+#### shuffle
+- **True for training**: Prevents memorization of order
+- **False for validation**: Reproducible evaluation
+- **Seed for reproducibility**: Same random order across runs
+
+#### drop_last
+- **True**: Ensures all batches have same size (important for some models)
+- **False**: Uses all data, but last batch may be smaller
+
+### The Training Loop Pattern
+
+DataLoaders integrate seamlessly into the training loop:
+
+```python
+for epoch in range(num_epochs):
+    for batch_idx, (inputs, targets) in enumerate(dataloader):
+        # Forward pass
+        outputs = model(inputs)
+        loss = loss_fn(outputs, targets)
+        
+        # Backward pass
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        
+        # Logging
+        if batch_idx % 100 == 0:
+            print(f"Batch {batch_idx}: Loss = {loss.item()}")
+```
+
+### Batch Tensor Shapes
+
+Understanding batch dimensions is crucial:
+
+```python
+# Single sample from dataset
+input_ids = [101, 2054, 2003, 102]  # Shape: [4]
+
+# Batch from dataloader (batch_size=8)
+batch_inputs = [
+    [101, 2054, 2003, 102],
+    [101, 5328, 1045, 102],
+    ...  # 6 more samples
+]  # Shape: [8, 4] = [batch_size, sequence_length]
+```
+
+The model processes all 8 examples simultaneously, computing:
+- 8 sets of embeddings
+- 8 attention patterns
+- 8 loss values (averaged for backprop)
+
+### DataLoader vs Dataset
+
+| Component | Purpose | When Called |
+|-----------|---------|-------------|
+| **Dataset** | Stores and organizes data | Once during initialization |
+| **DataLoader** | Serves batches during training | Every training step |
+
+```python
+# Dataset: "Here's all the data, organized"
+dataset = GPTDatasetV1(text, tokenizer, max_length, stride)
+print(f"Total samples: {len(dataset)}")  # e.g., 10,000
+
+# DataLoader: "Here's how to serve it for training"
+dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
+print(f"Batches per epoch: {len(dataloader)}")  # e.g., 313 (10,000/32)
+```
+
+### Iteration Patterns
+
+#### Training (Multiple Epochs)
+```python
+for epoch in range(10):  # Train for 10 epochs
+    for batch in dataloader:  # Each epoch sees all data
+        train_step(batch)
+    # Shuffle happens automatically between epochs
+```
+
+#### Quick Testing (First Few Batches)
+```python
+data_iter = iter(dataloader)
+first_batch = next(data_iter)
+second_batch = next(data_iter)
+# Useful for debugging or sanity checks
+```
+
+### Impact on Model Training
+
+DataLoader design choices directly affect training dynamics:
+
+1. **Larger batches → Smoother gradients**
+   - More stable training
+   - Can use higher learning rates
+   - May converge to worse minima
+
+2. **Smaller batches → Noisier gradients**
+   - Acts as regularization
+   - Needs smaller learning rates
+   - Often better final performance
+
+3. **Shuffling → Better generalization**
+   - Breaks spurious correlations
+   - Ensures diverse mini-batches
+   - Critical for small datasets
+
+### Connection to Transformer Training
+
+For transformer models specifically:
+
+- **Attention computation**: Scales with sequence length squared
+- **Batch processing**: Parallelizes across batch dimension
+- **Memory requirements**: `batch_size × sequence_length × model_dim`
+- **Gradient accumulation**: Simulate larger batches on limited hardware
+
+Example memory calculation:
+```
+batch_size = 8
+sequence_length = 512
+model_dim = 768 (BERT-base)
+Memory ≈ 8 × 512 × 768 × 4 bytes = ~12 MB per batch
+```
+
+### Best Practices
+
+1. **Start with smaller batches** during development (faster iteration)
+2. **Monitor GPU memory** usage to find optimal batch size
+3. **Use gradient accumulation** if optimal batch size exceeds memory
+4. **Set different configs** for train/val/test dataloaders
+5. **Save DataLoader state** for resuming interrupted training
+
 ## Reflection Questions
 
 - What makes a good training corpus for language models?
@@ -335,3 +539,8 @@ The quality and diversity of these context-target pairs directly determine model
 - What are the trade-offs between different tokenization strategies?
 - How might you design a tokenizer for a specialized domain (e.g., code, chemistry)?
 - What role do special tokens play in controlling model behavior?
+- Why is batching essential for efficient GPU utilization?
+- How does batch size affect the bias-variance tradeoff in training?
+- What's the relationship between batch size and learning rate?
+- When would you disable shuffling in a DataLoader?
+- How do DataLoaders enable training on datasets larger than RAM?

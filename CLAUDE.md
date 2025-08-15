@@ -271,3 +271,5 @@ Implements data acquisition, text preprocessing, tokenization, and dataset prepa
 Focuses on understanding and implementing the BPE algorithm from scratch.
 
 **Status:** In development
+
+- remember to ALWAYS use the 'cargo' command to modify .toml files
